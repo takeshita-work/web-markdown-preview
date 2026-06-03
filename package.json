@@ -1,0 +1,26 @@
+{
+  "name": "web-markdown-preview",
+  "version": "2.0.0",
+  "description": "ローカル Markdown / PDF プレビュー（標準 markdown-it / marp 両対応、File System Access API で完全クライアント側描画）",
+  "type": "module",
+  "bin": {
+    "web-markdown-preview": "bin/cli.js"
+  },
+  "scripts": {
+    "start": "node bin/cli.js",
+    "dev": "node bin/cli.js --watch"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public"
+  ],
+  "dependencies": {
+    "@marp-team/marp-core": "^4.0.1",
+    "esbuild": "^0.28.0",
+    "express": "^4.21.2",
+    "markdown-it": "^14.1.0",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
+  }
+}

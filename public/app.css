@@ -1,0 +1,183 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+#app { display: flex; flex-direction: column; height: 100vh; }
+#workspace { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+#footer {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-top: 1px solid #ddd; background: #f7f7f7; overflow: hidden;
+}
+#footer label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
+#footer select { font-size: 12px; padding: 2px 4px; }
+
+/* ズーム操作を一体化（[−][100%][＋] を隙間なく連結） */
+.zoom-group { display: inline-flex; align-items: stretch; }
+.zoom-group > * {
+  margin: 0; border: 1px solid #ccc; border-radius: 0; background: #fff;
+  font-size: 12px; line-height: 1;
+}
+.zoom-group > *:not(:first-child) { border-left: none; }
+.zoom-group > :first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+.zoom-group > :last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+.zoom-group button { width: 26px; padding: 3px 0; text-align: center; cursor: pointer; }
+.zoom-group button:hover { background: #e8e8e8; }
+.zoom-group select { padding: 3px 4px; }
+
+/* ---- サイドバー共通 ---- */
+#sidebar, #sidebar-right {
+  flex: 0 0 auto; display: flex; flex-direction: column;
+  background: #fafafa; overflow: hidden;
+}
+#sidebar { width: 300px; min-width: 160px; border-right: 1px solid #ddd; }
+#sidebar-right { width: 240px; min-width: 140px; border-left: 1px solid #ddd; }
+
+.pane-head {
+  padding: 6px 12px; font-weight: 600; font-size: 12px; color: #555;
+  border-bottom: 1px solid #eee; background: #f0f0f0; flex: 0 0 auto;
+}
+
+/* ---- スプリッタ ---- */
+.splitter { position: relative; flex: 0 0 5px; cursor: col-resize; background: #e3e3e3; }
+.splitter:hover { background: #b9b9b9; }
+.splitter.collapsed { flex-basis: 10px; cursor: default; background: transparent; }
+.splitter.collapsed:hover { background: transparent; }
+.split-handle {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  width: 9px; height: 28px; padding: 0; border: 1px solid #b5b5b5; border-radius: 5px;
+  background: #d3d3d3; color: #555; font-size: 9px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; z-index: 5;
+}
+.split-handle:hover { background: #c2c2c2; }
+
+/* ---- 左: フォルダ操作 ---- */
+.open-bar {
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
+  padding: 6px 8px; border-bottom: 1px solid #eee; background: #f0f0f0; flex: 0 0 auto;
+}
+.open-bar button {
+  font-size: 15px; line-height: 1; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px;
+  background: #fff; cursor: pointer; flex: 0 0 auto;
+}
+.open-bar button:hover:not(:disabled) { background: #e8e8e8; }
+.open-bar button:disabled { opacity: .45; cursor: default; }
+.root-name { flex: 1; font-size: 12px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* モーダルダイアログ */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center; z-index: 2000;
+}
+.modal-box {
+  background: #fff; border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
+  padding: 16px; width: min(560px, 90vw);
+}
+.modal-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: #333; }
+.modal-input {
+  width: 100%; box-sizing: border-box; font-size: 13px; padding: 8px 10px;
+  border: 1px solid #ccc; border-radius: 4px;
+}
+.modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.tree-hint { padding: 12px; font-size: 12px; color: #999; line-height: 1.6; }
+
+/* ---- 左: ツリー ---- */
+#tree-pane { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
+#tree { flex: 1 1 auto; overflow: auto; padding: 6px 0; font-size: 13px; }
+
+.node { user-select: none; }
+.dir-label, .file-label {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 8px; cursor: pointer; white-space: nowrap;
+}
+.dir-label:hover, .file-label:hover { background: #ececec; }
+.dir-label .caret { width: 12px; display: inline-block; transition: transform .1s; color: #888; }
+.node.collapsed > .children { display: none; }
+.node.collapsed > .dir-label .caret { transform: rotate(-90deg); }
+.children { margin-left: 14px; }
+.file-label input { margin: 0; }
+.file-label.active { background: #e3f0ff; }
+
+/* ---- 右: 見出しアウトライン ---- */
+#outline { flex: 1 1 auto; overflow: auto; padding: 4px 0; font-size: 13px; }
+.o-children { margin-left: 12px; }
+.outline-node.collapsed > .o-children { display: none; }
+.outline-item {
+  display: flex; align-items: center; gap: 2px;
+  padding: 2px 8px; cursor: pointer; color: #333; border-left: 3px solid transparent;
+}
+.outline-item:hover { background: #ececec; }
+.o-caret {
+  width: 12px; flex: 0 0 auto; display: inline-block; text-align: center;
+  color: #999; transition: transform .1s;
+}
+.outline-node.collapsed > .outline-item .o-caret { transform: rotate(-90deg); }
+.o-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outline-item.lv1 .o-text { font-weight: 600; }
+.outline-item.lv3 .o-text, .outline-item.lv4 .o-text { color: #555; }
+.outline-item.lv5 .o-text, .outline-item.lv6 .o-text { color: #777; }
+.outline-item.active { background: #fff3cd; border-left-color: #f0ad4e; }
+.outline-item.active:hover { background: #ffe9a8; }
+
+/* ---- メイン ---- */
+#main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+/* ヘッダー下: メインコンテンツ + 右サイドバー */
+#content-row { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+#toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-bottom: 1px solid #ddd; background: #f7f7f7; overflow: hidden;
+}
+#toolbar label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
+#toolbar select { font-size: 12px; padding: 2px 4px; }
+#toggle-left, #toggle-right {
+  flex: 0 0 auto; font-size: 15px; line-height: 1; padding: 3px 7px;
+  border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer;
+}
+#toggle-left:hover, #toggle-right:hover { background: #e8e8e8; }
+#toggle-left.off, #toggle-right.off { background: #d7d7d7; color: #888; }
+.spacer { flex: 1; }
+#zoom-indicator {
+  font-size: 12px; color: #555; cursor: pointer; padding: 2px 6px;
+  border: 1px solid #ddd; border-radius: 4px; background: #fff; min-width: 46px; text-align: center;
+}
+#zoom-indicator:hover { background: #eee; }
+.tbtn {
+  flex: 0 0 auto; font-size: 12px; line-height: 1; padding: 4px 7px;
+  border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer;
+}
+.tbtn:hover { background: #e8e8e8; }
+.tbtn.on { background: #d7ebff; border-color: #9cc6ee; }
+.tbtn:disabled { opacity: .4; cursor: default; }
+
+/* コンテキストメニュー */
+.ctxmenu {
+  position: fixed; z-index: 1000; background: #fff; border: 1px solid #bbb;
+  border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: 4px 0;
+  min-width: 170px; font-size: 13px;
+}
+.ctxmenu .mi { padding: 6px 14px; cursor: pointer; white-space: nowrap; }
+.ctxmenu .mi:hover { background: #e3f0ff; }
+
+/* トースト */
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: #333; color: #fff; padding: 8px 14px; border-radius: 6px;
+  font-size: 12px; z-index: 1001; opacity: 0; transition: opacity .15s; pointer-events: none;
+}
+.toast.show { opacity: .95; }
+
+/* ファイルアイコン */
+.ficon { flex: 0 0 auto; }
+
+#tabs { display: flex; gap: 2px; overflow-x: auto; max-width: 55%; }
+.tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; font-size: 12px; border: 1px solid #ddd; border-bottom: none;
+  border-radius: 5px 5px 0 0; background: #ececec; cursor: pointer; white-space: nowrap;
+}
+.tab.active { background: #f7f7f7; font-weight: 600; }
+.tab.preview { font-style: italic; }
+.tab .close { color: #999; cursor: pointer; }
+.tab .close:hover { color: #c00; }
+
+#preview { flex: 1; position: relative; background: #fff; }
+#preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+#preview iframe.hidden { display: none; }
+#empty { display: flex; height: 100%; align-items: center; justify-content: center; color: #999; }

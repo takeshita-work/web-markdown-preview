@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Markdown プレビュー</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="workspace">
+      <!-- 左サイドバー -->
+      <aside id="sidebar">
+        <div class="open-bar">
+          <button id="open-folder" title="フォルダを選択">📂</button>
+          <span id="root-name" class="root-name">（未選択）</span>
+        </div>
+        <!-- ファイルツリー -->
+        <div id="tree-pane">
+          <div id="tree">
+            <div class="tree-hint">対象ディレクトリを選択してください。</div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="splitter" id="split-left" title="ドラッグで幅変更"><button class="split-handle" id="collapse-left" title="フォルダを非表示">‹</button></div>
+
+      <!-- センター（ヘッダー=タブのみ + 下にコンテンツと右サイドバー） -->
+      <main id="main">
+        <div id="toolbar">
+          <button id="open-path" class="tbtn" disabled title="ファイルを選択">📄</button>
+          <div id="tabs"></div>
+        </div>
+        <div id="content-row">
+          <div id="preview">
+            <div id="empty">.md, .pdf を選択してください。</div>
+          </div>
+          <div class="splitter" id="split-right" title="ドラッグで幅変更"><button class="split-handle" id="collapse-right" title="見出しを非表示">›</button></div>
+          <!-- 右サイドバー: 見出し -->
+          <aside id="sidebar-right">
+            <div id="outline">
+              <div class="tree-hint">見出しがありません。</div>
+            </div>
+          </aside>
+        </div>
+      </main>
+      </div>
+
+      <!-- フッター: 各種コントロール -->
+      <div id="footer">
+        <div class="spacer"></div>
+        <button id="btn-print" class="tbtn" title="コンテンツを印刷 / PDF 出力">🖨</button>
+        <button id="btn-source" class="tbtn" title="ソース表示の切替">&lt;/&gt;</button>
+        <div class="zoom-group">
+          <button id="zoom-out" title="縮小 (Ctrl+Shift+-)">−</button>
+          <select id="zoom-select" title="拡大率 (Ctrl+Shift+0 でリセット)"></select>
+          <button id="zoom-in" title="拡大 (Ctrl+Shift++)">＋</button>
+        </div>
+        <select id="view" title="表示"></select>
+      </div>
+    </div>
+    <script type="module" src="bundle.js"></script>
+  </body>
+</html>
