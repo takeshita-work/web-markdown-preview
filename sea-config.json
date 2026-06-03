@@ -1,0 +1,10 @@
+{
+  "main": "dist/app.cjs",
+  "output": "dist/sea-prep.blob",
+  "disableExperimentalSEAWarning": true,
+  "assets": {
+    "index.html": "public/index.html",
+    "app.css": "public/app.css",
+    "bundle.js": "public/bundle.js"
+  }
+}

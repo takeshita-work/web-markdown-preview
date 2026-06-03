@@ -37,16 +37,74 @@ web-markdown-preview [オプション]
 web-markdown-preview/
 ├── bin/cli.js          CLI エントリ（引数パース → startServer）
 ├── src/
-│   ├── server.js       Express 静的配信 + 起動時に esbuild でクライアントをバンドル
+│   ├── server.js       Express 静的配信 + 起動時に esbuild でクライアントをバンドル（dev 用）
+│   ├── standalone.js   配布用エントリ（SEA 埋め込みアセット配信 + start/stop/status/run）
 │   └── client/main.js  クライアント本体（FS Access API + 描画 + UI のすべて）
 ├── public/
 │   ├── index.html      画面レイアウト（ヘッダー / 本文 / 右サイドバー / フッター）
 │   ├── app.css         スタイル
 │   └── bundle.js       esbuild 生成物（.gitignore 済み・コミットしない）
-├── scripts/            起動スクリプト（cmd / ps1 / sh）
+├── scripts/
+│   ├── start.{cmd,ps1,sh}  dev 起動スクリプト
+│   └── build-exe.mjs        スタンドアロン exe のビルド
+├── sea-config.json     Node SEA 設定（埋め込みアセット定義）
+├── dist/               exe ビルド生成物（.gitignore 済み）
 ├── docs/               本ドキュメント
 └── package.json
 ```
+
+## 配布（スタンドアロン実行ファイル）
+
+Node / esbuild 不要の**単一実行ファイル**を作る。Node 標準の **SEA（Single Executable Application）** を使い、静的アセット（index.html / app.css / bundle.js）を exe に埋め込む。
+
+```bash
+npm run build:exe        # → dist/web-markdown-preview.exe（+ 起動.cmd / 停止.cmd）
+```
+
+ビルド手順（`scripts/build-exe.mjs`）:
+
+1. クライアントを esbuild でバンドル → `public/bundle.js`
+2. 配布用エントリ `src/standalone.js` を CJS にバンドル → `dist/app.cjs`
+3. `node --experimental-sea-config sea-config.json` で SEA blob を生成
+4. `node` 実行バイナリを `dist/` にコピー
+5. `postject` で blob を注入して単一実行ファイル化（要 `npx postject`／初回はネット取得）
+
+> ⚠️ exe サイズは約 90MB（Node ランタイム同梱のため）。Windows では署名が無効化される警告が出るが、ローカル実行は可能（配布時に SmartScreen 警告が出る場合あり）。
+
+### 起動 / 停止
+
+用途で 2 モードを使い分ける。
+
+| 用途 | 起動 | 停止 |
+|---|---|---|
+| ターミナルに居座らせる（ログを見る） | `web-markdown-preview.exe run` | **Ctrl+C** |
+| 裏で動かす（ターミナルを閉じてもよい） | `web-markdown-preview.exe start` | `web-markdown-preview.exe stop` |
+
+```
+web-markdown-preview.exe [start]   バックグラウンド起動 + ブラウザを開く（二重起動ガード付き）
+web-markdown-preview.exe stop      停止（pid ファイル経由）
+web-markdown-preview.exe status    起動状態
+web-markdown-preview.exe run       フォアグラウンド実行（Ctrl+C で停止）
+  -p, --port <番号>                ポート（既定 4321、環境変数 PORT でも可）
+```
+
+- `run` … フォアグラウンド。pid ファイルは使わず、`Ctrl+C`（SIGINT）で `server.close()` → 終了。
+- `start` / `stop` … バックグラウンド。起動情報（pid / port）を OS 一時ディレクトリの `web-markdown-preview.json` に記録し、`stop` がそれを読んでプロセスを終了・ファイル削除。`status` で起動状態を確認できる。
+- ダブルクリック運用には `dist/起動.cmd`（= `start`）/ `dist/停止.cmd`（= `stop`）を同梱。
+- dev 時は `npm run standalone -- <cmd>`（= `node src/standalone.js`、アセットは `public/` から読む）で同じ動作を確認できる。
+
+### GitHub Releases への自動公開（CI）
+
+`.github/workflows/release.yml` が **`v*` タグの push** をトリガーに windows-latest で `npm run build:exe` を実行し、`dist/web-markdown-preview.exe` と zip をリリースに添付する。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0      # → Actions が走り Releases に exe が公開される
+```
+
+- 手動実行（Actions タブの **Run workflow**）でもビルド可能。その場合はリリースには添付せず **Artifacts** に保存。
+- Windows exe には Windows ランナーが必要（SEA は実行中の `node` を同梱するため）。mac / Linux 版も配る場合は `runs-on` を `macos-latest` / `ubuntu-latest` にしたジョブを matrix で追加する（`build-exe.mjs` は OS を判定して対応済み）。
+- 生成 exe は未署名のため、ダウンロード時に SmartScreen 警告が出る場合がある（コード署名証明書があれば署名ステップを追加可能）。
 
 ## ビルドの仕組み
 

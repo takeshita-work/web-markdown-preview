@@ -93,7 +93,7 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .node.collapsed > .dir-label .caret { transform: rotate(-90deg); }
 .children { margin-left: 14px; }
 .file-label input { margin: 0; }
-.file-label.active { background: #e3f0ff; }
+.file-label.active { background: #c9ccd1; }
 
 /* ---- 右: 見出しアウトライン ---- */
 #outline { flex: 1 1 auto; overflow: auto; padding: 4px 0; font-size: 13px; }
@@ -113,8 +113,8 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .outline-item.lv1 .o-text { font-weight: 600; }
 .outline-item.lv3 .o-text, .outline-item.lv4 .o-text { color: #555; }
 .outline-item.lv5 .o-text, .outline-item.lv6 .o-text { color: #777; }
-.outline-item.active { background: #fff3cd; border-left-color: #f0ad4e; }
-.outline-item.active:hover { background: #ffe9a8; }
+.outline-item.active { background: #c9ccd1; border-left-color: #6b7178; }
+.outline-item.active:hover { background: #bcc0c6; }
 
 /* ---- メイン ---- */
 #main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
@@ -164,7 +164,11 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .toast.show { opacity: .95; }
 
 /* ファイルアイコン */
-.ficon { flex: 0 0 auto; }
+.ficon { flex: 0 0 auto; display: inline-flex; align-items: center; color: #555; }
+/* SVG アイコンの位置・サイズを揃える（ツリー/タブのファイル表示・ツールバーの各ボタン） */
+.ficon svg,
+.tbtn svg,
+.open-bar button svg { display: block; }
 
 #tabs { display: flex; gap: 2px; overflow-x: auto; max-width: 55%; }
 .tab {

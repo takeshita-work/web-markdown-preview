@@ -1,6 +1,6 @@
 {
   "name": "web-markdown-preview",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "ローカル Markdown / PDF プレビュー（標準 markdown-it / marp 両対応、File System Access API で完全クライアント側描画）",
   "type": "module",
   "bin": {
@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "node bin/cli.js",
-    "dev": "node bin/cli.js --watch"
+    "dev": "node bin/cli.js --watch",
+    "standalone": "node src/standalone.js",
+    "build:exe": "node scripts/build-exe.mjs"
   },
   "files": [
     "bin",

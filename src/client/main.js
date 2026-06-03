@@ -76,6 +76,9 @@ const $collapseRight = document.getElementById('collapse-right')
 const $btnSource = document.getElementById('btn-source')
 const $btnPrint = document.getElementById('btn-print')
 
+// 既定（ファイル未選択時）のタブタイトル。index.html の <title> を初期値に使う
+const DEFAULT_TITLE = document.title || 'web markdown preview'
+
 // ---- パスユーティリティ ------------------------------------------------------
 
 const posixDirname = (p) => {
@@ -95,7 +98,22 @@ function resolvePath(baseDir, src) {
 }
 
 const cssEsc = (s) => s.replace(/["\\]/g, '\\$&')
-const fileIcon = (name) => (isPdfPath(name) ? '📕' : '📄')
+
+// ---- アイコン（シンプルな SVG。currentColor で文字色／配色に追従）-----------
+const ICONS = {
+  // 一般的なファイル: 角折れの書類 + 本文行
+  file: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M3.5 1.5h5L12.5 5v9a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5z"/><path d="M8.5 1.5V5h4"/><path d="M5.6 8.5h4.8M5.6 11h4.8"/></svg>`,
+  // Markdown: 青の角丸バッジ + 白の「M」と下向き矢印
+  markdown: `<svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="3.5" width="14" height="9" rx="2" fill="#2563eb"/><path d="M3.7 10V6l2 2.4L7.7 6v4M11 6v3.3M9.6 8.1 11 9.7 12.4 8.1" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
+  // PDF: 赤の角丸バッジ + 白の「PDF」表記
+  pdf: `<svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="3.5" width="14" height="9" rx="2" fill="#e0392b"/><text x="8" y="10.35" font-size="5.2" font-weight="700" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" letter-spacing="-.3">PDF</text></svg>`,
+  // フォルダ: タブ付きの閉じたフォルダ
+  folder: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.1a1 1 0 0 1 .72.3l.86.9a1 1 0 0 0 .72.3h5.6a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>`,
+  // プリンター
+  printer: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 6.5v-4h7v4"/><path d="M4.5 12.5h-2a1 1 0 0 1-1-1V8a1.5 1.5 0 0 1 1.5-1.5h10A1.5 1.5 0 0 1 14.5 8v3.5a1 1 0 0 1-1 1h-2"/><rect x="4.5" y="10" width="7" height="4.5" rx=".5"/><circle cx="12" cy="8.6" r=".55" fill="currentColor" stroke="none"/></svg>`,
+}
+// 拡張子に応じたファイルアイコン（SVG マークアップを返す）
+const fileIcon = (name) => (isPdfPath(name) ? ICONS.pdf : /\.md$/i.test(name) ? ICONS.markdown : ICONS.file)
 
 // ---- フォルダ選択 & 走査 -----------------------------------------------------
 
@@ -408,7 +426,7 @@ function renderNode(node, expanded = null) {
     label.dataset.path = node.path
     const icon = document.createElement('span')
     icon.className = 'ficon'
-    icon.textContent = fileIcon(node.name)
+    icon.innerHTML = fileIcon(node.name)
     const span = document.createElement('span')
     span.textContent = node.name
     label.appendChild(icon)
@@ -1132,6 +1150,8 @@ function syncPreview() {
   if (activePath) revealInTree(activePath) // ツリーで該当ファイルまで展開・表示
   // 「表示」セレクトをアクティブタブの設定に同期（無い選択肢なら既定 CSS）
   const at = tabs.get(activePath)
+  // タブタイトルをプレビュー中のファイル名に追従（未選択時は既定へ戻す）
+  document.title = at ? tabDisplayLabel(activePath) : DEFAULT_TITLE
   $view.value = at && [...$view.options].some((o) => o.value === at.view) ? at.view : defaultViewValue()
   updateDefaultMarker() // アクティブタブの既定に (default) を付与
   // ソース/コピー系ボタンの状態
@@ -1168,7 +1188,7 @@ function renderTabs() {
     tab.addEventListener('contextmenu', (e) => pathMenu(e, path))
     const icon = document.createElement('span')
     icon.className = 'ficon'
-    icon.textContent = fileIcon(t.label)
+    icon.innerHTML = fileIcon(t.label)
     tab.appendChild(icon)
     const title = document.createElement('span')
     title.textContent = tabDisplayLabel(path)
@@ -1430,6 +1450,11 @@ function setupSplitters() {
 }
 
 // ---- イベント ---------------------------------------------------------------
+
+// ボタンのアイコンを SVG で設定（ICONS を単一の定義元にする）
+$openBtn.innerHTML = ICONS.folder
+$openPathBtn.innerHTML = ICONS.file
+$btnPrint.innerHTML = ICONS.printer
 
 $openBtn.addEventListener('click', openFolder)
 $openPathBtn.addEventListener('click', openPathDialog)
