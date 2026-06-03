@@ -1,6 +1,6 @@
 {
   "name": "web-markdown-preview",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ローカル Markdown / PDF プレビュー（標準 markdown-it / marp 両対応、File System Access API で完全クライアント側描画）",
   "type": "module",
   "bin": {
@@ -24,5 +24,10 @@
     "markdown-it": "^14.1.0",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "png-to-ico": "^3.0.1",
+    "rcedit": "^5.0.2",
+    "sharp": "^0.34.5"
   }
 }

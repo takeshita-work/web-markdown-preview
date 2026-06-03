@@ -5,6 +5,7 @@
   "assets": {
     "index.html": "public/index.html",
     "app.css": "public/app.css",
-    "bundle.js": "public/bundle.js"
+    "bundle.js": "public/bundle.js",
+    "favicon.svg": "public/favicon.svg"
   }
 }

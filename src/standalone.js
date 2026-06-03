@@ -44,6 +44,7 @@ const TYPES = {
   'index.html': 'text/html; charset=utf-8',
   'app.css': 'text/css; charset=utf-8',
   'bundle.js': 'text/javascript; charset=utf-8',
+  'favicon.svg': 'image/svg+xml; charset=utf-8',
 }
 function readAsset(name) {
   if (isSea) return Buffer.from(sea.getAsset(name)) // ArrayBuffer → Buffer

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="web markdown preview">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9ca3af" />
+      <stop offset="1" stop-color="#4b5563" />
+    </linearGradient>
+  </defs>
+
+  <!-- 丸の背景 -->
+  <circle cx="128" cy="128" r="120" fill="url(#bg)" />
+  <!-- 柔らかいハイライト（中心・円に接する） -->
+  <ellipse cx="128" cy="128" rx="120" ry="82" fill="#ffffff" opacity="0.10" />
+  <!-- 内側のリング -->
+  <circle cx="128" cy="128" r="104" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.22" />
+
+  <!-- Markdown マーク（M + 下向き矢印） -->
+  <g fill="none" stroke="#ffffff" stroke-width="18" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M68 160V96l27 31 27-31v64" />
+    <path d="M172 96v40" />
+    <path d="M150 124l22 24 22-24" />
+  </g>
+</svg>
