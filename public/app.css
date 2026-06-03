@@ -145,6 +145,11 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .tbtn:hover { background: #e8e8e8; }
 .tbtn.on { background: #d7ebff; border-color: #9cc6ee; }
 .tbtn:disabled { opacity: .4; cursor: default; }
+/* 終了ボタン（ツールバー右端・グレーアイコン） */
+#btn-quit { margin-left: auto; color: #555; }
+/* 確認ダイアログの実行ボタン（グレー） */
+.tbtn.danger { color: #fff; background: #6b7178; border-color: #5b6066; }
+.tbtn.danger:hover { background: #5b6066; }
 
 /* コンテキストメニュー */
 .ctxmenu {

@@ -75,6 +75,7 @@ const $collapseLeft = document.getElementById('collapse-left')
 const $collapseRight = document.getElementById('collapse-right')
 const $btnSource = document.getElementById('btn-source')
 const $btnPrint = document.getElementById('btn-print')
+const $btnQuit = document.getElementById('btn-quit')
 
 // 既定（ファイル未選択時）のタブタイトル。index.html の <title> を初期値に使う
 const DEFAULT_TITLE = document.title || 'web markdown preview'
@@ -111,6 +112,8 @@ const ICONS = {
   folder: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.1a1 1 0 0 1 .72.3l.86.9a1 1 0 0 0 .72.3h5.6a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>`,
   // プリンター
   printer: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 6.5v-4h7v4"/><path d="M4.5 12.5h-2a1 1 0 0 1-1-1V8a1.5 1.5 0 0 1 1.5-1.5h10A1.5 1.5 0 0 1 14.5 8v3.5a1 1 0 0 1-1 1h-2"/><rect x="4.5" y="10" width="7" height="4.5" rx=".5"/><circle cx="12" cy="8.6" r=".55" fill="currentColor" stroke="none"/></svg>`,
+  // 電源（終了）
+  power: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.4a5 5 0 1 0 6.6 0"/></svg>`,
 }
 // 拡張子に応じたファイルアイコン（SVG マークアップを返す）
 const fileIcon = (name) => (isPdfPath(name) ? ICONS.pdf : /\.md$/i.test(name) ? ICONS.markdown : ICONS.file)
@@ -855,6 +858,66 @@ async function copyText(text) {
   }
 }
 
+// ---- 確認ダイアログ / アプリ終了 --------------------------------------------
+
+// OK / キャンセルの確認ダイアログ（モーダル）。OK で onOk を実行
+function confirmDialog(message, okLabel, onOk) {
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  const box = document.createElement('div')
+  box.className = 'modal-box'
+  const title = document.createElement('div')
+  title.className = 'modal-title'
+  title.textContent = message
+  const btns = document.createElement('div')
+  btns.className = 'modal-btns'
+  const cancel = document.createElement('button')
+  cancel.className = 'tbtn'
+  cancel.textContent = 'キャンセル'
+  const ok = document.createElement('button')
+  ok.className = 'tbtn danger'
+  ok.textContent = okLabel || 'OK'
+  btns.append(cancel, ok)
+  box.append(title, btns)
+  overlay.append(box)
+  document.body.append(overlay)
+  const onKey = (e) => {
+    if (e.key === 'Escape') close()
+    else if (e.key === 'Enter') {
+      close()
+      onOk()
+    }
+  }
+  const close = () => {
+    overlay.remove()
+    document.removeEventListener('keydown', onKey)
+  }
+  ok.addEventListener('click', () => {
+    close()
+    onOk()
+  })
+  cancel.addEventListener('click', close)
+  overlay.addEventListener('mousedown', (e) => {
+    if (e.target === overlay) close()
+  })
+  document.addEventListener('keydown', onKey)
+  ok.focus()
+}
+
+// サーバへ終了要求を送り、終了後の案内オーバーレイを表示する。
+// サーバ即終了で fetch が失敗することがあるが、それは正常（成功扱い）
+async function quitApp() {
+  try {
+    await fetch('/__shutdown', { method: 'POST' })
+  } catch {}
+  const o = document.createElement('div')
+  o.className = 'modal-overlay'
+  o.style.background = 'rgba(0,0,0,.55)'
+  o.innerHTML =
+    '<div class="modal-box" style="text-align:center"><div class="modal-title">アプリを終了しました</div><div style="font-size:13px;color:#555">このタブを閉じてください。</div></div>'
+  document.body.append(o)
+}
+
 let toastTimer = null
 function toast(msg) {
   let el = document.getElementById('mdp-toast')
@@ -1455,6 +1518,8 @@ function setupSplitters() {
 $openBtn.innerHTML = ICONS.folder
 $openPathBtn.innerHTML = ICONS.file
 $btnPrint.innerHTML = ICONS.printer
+$btnQuit.innerHTML = ICONS.power
+$btnQuit.addEventListener('click', () => confirmDialog('アプリを終了しますか？', '終了', quitApp))
 
 $openBtn.addEventListener('click', openFolder)
 $openPathBtn.addEventListener('click', openPathDialog)

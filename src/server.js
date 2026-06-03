@@ -36,6 +36,11 @@ export async function startServer({ port = 4321, watch = false } = {}) {
   }
 
   const app = express()
+  // アプリ画面からの終了要求: 応答を返してからプロセスを終了（dev/standalone で共通の挙動）
+  app.post('/__shutdown', (req, res) => {
+    res.json({ ok: true })
+    setTimeout(() => process.exit(0), 150)
+  })
   // 開発用ツールなので静的アセットはキャッシュさせない
   app.use(
     express.static(PUBLIC_DIR, {

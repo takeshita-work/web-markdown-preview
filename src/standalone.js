@@ -99,6 +99,21 @@ function selfArgs(extra) {
 function serve(port) {
   const server = http.createServer((req, res) => {
     let p = (req.url || '/').split('?')[0]
+    // アプリ画面からの終了要求: 応答を返してからプロセスを終了
+    if (p === '/__shutdown') {
+      res.setHeader('Content-Type', 'application/json')
+      res.end('{"ok":true}')
+      setTimeout(() => {
+        try {
+          fs.unlinkSync(STATE_FILE)
+        } catch {}
+        try {
+          server.close()
+        } catch {}
+        process.exit(0)
+      }, 150)
+      return
+    }
     if (p === '/' || p === '') p = '/index.html'
     const name = p.replace(/^\/+/, '')
     if (!Object.prototype.hasOwnProperty.call(TYPES, name)) {
