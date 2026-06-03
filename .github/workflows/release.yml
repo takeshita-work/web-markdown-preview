@@ -50,3 +50,5 @@ jobs:
             dist/web-markdown-preview.exe
             web-markdown-preview-windows-x64.zip
           generate_release_notes: true
+          # 開発中（0.x）のタグはプレリリース扱い。1.0 以降は正式リリース
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
