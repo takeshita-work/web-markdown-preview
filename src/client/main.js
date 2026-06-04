@@ -75,7 +75,9 @@ const $collapseLeft = document.getElementById('collapse-left')
 const $collapseRight = document.getElementById('collapse-right')
 const $btnSource = document.getElementById('btn-source')
 const $btnPrint = document.getElementById('btn-print')
-const $btnQuit = document.getElementById('btn-quit')
+const $btnMenu = document.getElementById('btn-menu')
+const $fileInfo = document.getElementById('file-info')
+const $loading = document.getElementById('loading')
 
 // 既定（ファイル未選択時）のタブタイトル。index.html の <title> を初期値に使う
 const DEFAULT_TITLE = document.title || 'web markdown preview'
@@ -112,8 +114,14 @@ const ICONS = {
   folder: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.1a1 1 0 0 1 .72.3l.86.9a1 1 0 0 0 .72.3h5.6a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>`,
   // プリンター
   printer: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 6.5v-4h7v4"/><path d="M4.5 12.5h-2a1 1 0 0 1-1-1V8a1.5 1.5 0 0 1 1.5-1.5h10A1.5 1.5 0 0 1 14.5 8v3.5a1 1 0 0 1-1 1h-2"/><rect x="4.5" y="10" width="7" height="4.5" rx=".5"/><circle cx="12" cy="8.6" r=".55" fill="currentColor" stroke="none"/></svg>`,
+  // ハンバーガーメニュー
+  menu: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg>`,
+  // 設定（歯車・ティース付きコグ。中心穴はマスクで抜く）
+  gear: `<svg viewBox="0 0 16 16" width="14" height="14"><defs><rect id="ct" x="7.05" y="0.7" width="1.9" height="3.6" rx=".5"/><mask id="cm"><rect width="16" height="16" fill="#fff"/><circle cx="8" cy="8" r="1.7" fill="#000"/></mask></defs><g fill="currentColor" mask="url(#cm)"><circle cx="8" cy="8" r="4.2"/><use href="#ct"/><use href="#ct" transform="rotate(45 8 8)"/><use href="#ct" transform="rotate(90 8 8)"/><use href="#ct" transform="rotate(135 8 8)"/><use href="#ct" transform="rotate(180 8 8)"/><use href="#ct" transform="rotate(225 8 8)"/><use href="#ct" transform="rotate(270 8 8)"/><use href="#ct" transform="rotate(315 8 8)"/></g></svg>`,
   // 電源（終了）
   power: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.4a5 5 0 1 0 6.6 0"/></svg>`,
+  // コピー（クリップボード）
+  copy: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v1"/></svg>`,
 }
 // 拡張子に応じたファイルアイコン（SVG マークアップを返す）
 const fileIcon = (name) => (isPdfPath(name) ? ICONS.pdf : /\.md$/i.test(name) ? ICONS.markdown : ICONS.file)
@@ -138,6 +146,8 @@ async function loadRoot() {
   $openPathBtn.disabled = false // フォルダ選択後は相対パス指定を有効化
   fileMap.clear()
   for (const p of [...tabs.keys()]) closeTab(p)
+  // ディレクトリ走査中はツリー領域に取得中インジケータを表示（renderTree で置き換わる）
+  $tree.innerHTML = '<div class="tree-loading"><span class="spin"></span><span>取得中</span></div>'
   const tree = await buildTree(rootHandle, rootHandle.name, '')
   lastTreeSig = treeSignature(tree)
   renderTree(tree) // 初期はすべて折りたたみ
@@ -466,6 +476,7 @@ function renderNode(node, expanded = null) {
       refreshTree() // 展開時に最新のディレクトリ内容へ更新
     }
   })
+  label.addEventListener('contextmenu', (e) => pathMenu(e, node.path)) // フォルダの相対パスをコピー
   const children = document.createElement('div')
   children.className = 'children'
   for (const c of node.children) {
@@ -649,12 +660,29 @@ function firstChangedLine(a, b) {
   return -1
 }
 
+// ファイル取得中インジケータ（速い読み込みでは出さないよう少し遅延して表示）
+let loadingTimer = null
+function showLoading() {
+  clearTimeout(loadingTimer)
+  loadingTimer = setTimeout(() => {
+    $loading.hidden = false
+  }, 180)
+}
+function hideLoading() {
+  clearTimeout(loadingTimer)
+  $loading.hidden = true
+}
+
 async function renderTab(tab, autoScroll) {
+  if (tab.path === activePath) showLoading()
   try {
     const file = await tab.handle.getFile()
     tab.lastModified = file.lastModified
+    tab.size = file.size // フッター情報用
     if (isPdfPath(tab.path)) {
       // PDF はブラウザ標準ビューアで表示（blob URL）
+      tab.lineCount = null // PDF は行数 / 文字数を持たない
+      tab.charCount = null
       for (const u of tab.blobUrls) URL.revokeObjectURL(u)
       tab.blobUrls = []
       const url = URL.createObjectURL(file)
@@ -665,6 +693,8 @@ async function renderTab(tab, autoScroll) {
       if (tab.path === activePath) renderOutline(tab)
     } else {
       const src = await file.text()
+      tab.charCount = src.length
+      tab.lineCount = src.split(/\r?\n/).length
       const dv = initialView(src) // 内容から決まる既定 view
       tab.defaultView = dv
       if (!tab.view) tab.view = dv // 初回は既定を採用
@@ -683,6 +713,7 @@ async function renderTab(tab, autoScroll) {
       if (tab.path === activePath) syncPreview() // セレクトを初期 view に同期
       // srcdoc 反映後の処理は iframe の load イベント（onIframeLoad）で行う
     }
+    if (tab.path === activePath) updateFileInfo() // ライブリロード時もフッター情報を更新
   } catch (e) {
     tab.iframe.removeAttribute('src')
     if (e && e.name === 'NotAllowedError') {
@@ -693,6 +724,8 @@ async function renderTab(tab, autoScroll) {
     } else {
       tab.iframe.srcdoc = `<pre style="color:red;padding:16px">${String((e && e.stack) || e)}</pre>`
     }
+  } finally {
+    if (tab.path === activePath) hideLoading()
   }
 }
 
@@ -918,6 +951,128 @@ async function quitApp() {
   document.body.append(o)
 }
 
+// ---- 設定（ポート） ---------------------------------------------------------
+
+async function openSettings() {
+  let cfg = { port: 4321, running: 0, canRestart: false, configFile: '' }
+  try {
+    cfg = await (await fetch('/__config')).json()
+  } catch {}
+
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  const box = document.createElement('div')
+  box.className = 'modal-box'
+  const title = document.createElement('div')
+  title.className = 'modal-title'
+  title.textContent = '設定'
+
+  const info = document.createElement('div')
+  info.className = 'modal-note'
+  info.textContent = `現在のポート: ${cfg.running}`
+
+  const row = document.createElement('label')
+  row.className = 'modal-row'
+  const cap = document.createElement('span')
+  cap.textContent = 'ポート'
+  const input = document.createElement('input')
+  input.type = 'number'
+  input.min = '1'
+  input.max = '65535'
+  input.className = 'modal-input'
+  input.style.width = '120px'
+  input.value = String(cfg.port || cfg.running || 4321)
+  row.append(cap, input)
+
+  const note = document.createElement('div')
+  note.className = 'modal-note'
+  note.textContent = '変更は設定ファイル(config.json)に保存され、次回起動時に反映されます。'
+
+  const btns = document.createElement('div')
+  btns.className = 'modal-btns'
+  const cancel = document.createElement('button')
+  cancel.className = 'tbtn'
+  cancel.textContent = 'キャンセル'
+  const save = document.createElement('button')
+  save.className = 'tbtn'
+  save.textContent = '保存'
+  btns.append(cancel)
+  let saveRestart = null
+  if (cfg.canRestart) {
+    saveRestart = document.createElement('button')
+    saveRestart.className = 'tbtn danger'
+    saveRestart.textContent = '保存して再起動'
+    btns.append(saveRestart)
+  }
+  btns.append(save)
+
+  box.append(title, info, row, note, btns)
+  overlay.append(box)
+  document.body.append(overlay)
+  const close = () => overlay.remove()
+
+  const getPort = () => {
+    const n = Number(input.value)
+    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+      toast('ポートは 1〜65535 で指定してください')
+      return null
+    }
+    return n
+  }
+  const saveConfig = async (port) => {
+    const r = await fetch('/__config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port }),
+    })
+    return r.ok
+  }
+
+  cancel.addEventListener('click', close)
+  overlay.addEventListener('mousedown', (e) => {
+    if (e.target === overlay) close()
+  })
+  save.addEventListener('click', async () => {
+    const port = getPort()
+    if (port == null) return
+    const ok = await saveConfig(port)
+    close()
+    toast(ok ? `ポート ${port} を保存しました（次回起動時に反映）` : '保存に失敗しました')
+  })
+  if (saveRestart) {
+    saveRestart.addEventListener('click', async () => {
+      const port = getPort()
+      if (port == null) return
+      if (!(await saveConfig(port))) {
+        toast('保存に失敗しました')
+        return
+      }
+      let url = `http://localhost:${port}`
+      try {
+        const r = await (await fetch('/__restart', { method: 'POST' })).json()
+        if (r && r.url) url = r.url
+      } catch {}
+      box.innerHTML = `<div class="modal-title">再起動しています…</div><div class="modal-note">新しいポート（${url}）へ移動します。</div>`
+      setTimeout(() => {
+        window.location.href = url
+      }, 1200)
+    })
+  }
+  input.focus()
+  input.select()
+}
+
+// ヘッダー右端のハンバーガーから開くドロップダウン（設定 / 終了）
+function openMenu(anchor) {
+  const rect = anchor.getBoundingClientRect()
+  showCtx(rect.left, rect.bottom + 4, [
+    { label: '設定', icon: ICONS.gear, action: openSettings },
+    { label: 'アプリを終了', icon: ICONS.power, action: () => confirmDialog('アプリを終了しますか？', '終了', quitApp) },
+  ])
+  // メニューの右端をボタンの右端に合わせる
+  ctxEl.style.left = Math.max(4, rect.right - ctxEl.offsetWidth) + 'px'
+}
+
 let toastTimer = null
 function toast(msg) {
   let el = document.getElementById('mdp-toast')
@@ -946,7 +1101,17 @@ function showCtx(x, y, items) {
   for (const it of items) {
     const mi = document.createElement('div')
     mi.className = 'mi'
-    mi.textContent = it.label
+    if (it.icon) {
+      // アイコン付き項目（SVG マークアップ）
+      const ic = document.createElement('span')
+      ic.className = 'mi-icon'
+      ic.innerHTML = it.icon
+      const tx = document.createElement('span')
+      tx.textContent = it.label
+      mi.append(ic, tx)
+    } else {
+      mi.textContent = it.label
+    }
     mi.addEventListener('click', () => {
       hideCtx()
       it.action()
@@ -963,6 +1128,13 @@ function showCtx(x, y, items) {
 document.addEventListener('click', hideCtx)
 document.addEventListener('scroll', hideCtx, true)
 window.addEventListener('blur', hideCtx)
+// 標準の右クリックメニューは全体で抑止（入力欄だけは貼り付け等のため許可）
+document.addEventListener('contextmenu', (e) => {
+  const el = e.target
+  const tag = el && el.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (el && el.isContentEditable)) return
+  e.preventDefault()
+})
 
 function copyPathItems(path) {
   const name = path.split('/').pop()
@@ -1222,7 +1394,61 @@ function syncPreview() {
   $btnSource.classList.toggle('on', !!(at && at.source))
   $btnSource.disabled = !isMd
   updateZoomUI() // ズーム UI をアクティブタブの現在モードに同期
+  updateFileInfo() // フッターのファイル情報をアクティブタブに同期
   if (!tabs.size) $outline.innerHTML = '<div class="tree-hint">見出しがありません。</div>'
+}
+
+// バイト数を読みやすい単位に
+function humanSize(bytes) {
+  if (bytes == null) return ''
+  if (bytes < 1024) return bytes + ' B'
+  const u = ['KB', 'MB', 'GB']
+  let n = bytes / 1024
+  let i = 0
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024
+    i++
+  }
+  return (n >= 100 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i]
+}
+
+// フッターのファイル情報（相対パス・行数・文字数・容量）を更新。
+// 項目はマージンで区切り、相対パスのコピーボタンを添える
+function updateFileInfo() {
+  const t = tabs.get(activePath)
+  $fileInfo.innerHTML = ''
+  if (!t) {
+    $fileInfo.title = ''
+    return
+  }
+  const shown = '/' + t.path // 先頭に「/」を付けて表示・コピー
+  // コピーボタン + パス（近接した1グループ）
+  const name = document.createElement('span')
+  name.className = 'fi-name'
+  const copy = document.createElement('button')
+  copy.className = 'fi-copy'
+  copy.title = 'パスをコピー'
+  copy.innerHTML = ICONS.copy
+  copy.addEventListener('click', () =>
+    copyText(shown).then((ok) => toast(ok ? 'パスをコピーしました' : 'コピーに失敗しました'))
+  )
+  const path = document.createElement('span')
+  path.className = 'fi-path'
+  path.textContent = shown
+  name.append(path, copy) // パスの右側にコピーボタン
+  $fileInfo.append(name)
+  // 行数 / 文字数 / 容量
+  const items = []
+  if (t.lineCount != null) items.push(`${t.lineCount.toLocaleString()} 行`)
+  if (t.charCount != null) items.push(`${t.charCount.toLocaleString()} 文字`)
+  if (t.size != null) items.push(humanSize(t.size))
+  for (const text of items) {
+    const s = document.createElement('span')
+    s.className = 'fi-item'
+    s.textContent = text
+    $fileInfo.append(s)
+  }
+  $fileInfo.title = [shown, ...items].join('   ')
 }
 
 // 同名ファイルが複数開かれているタブは親ディレクトリ名を付けて区別
@@ -1518,8 +1744,12 @@ function setupSplitters() {
 $openBtn.innerHTML = ICONS.folder
 $openPathBtn.innerHTML = ICONS.file
 $btnPrint.innerHTML = ICONS.printer
-$btnQuit.innerHTML = ICONS.power
-$btnQuit.addEventListener('click', () => confirmDialog('アプリを終了しますか？', '終了', quitApp))
+$btnMenu.innerHTML = ICONS.menu
+$btnMenu.addEventListener('click', (e) => {
+  e.stopPropagation() // document の click→hideCtx で即閉じしないように
+  if (ctxEl.style.display === 'block') hideCtx() // 開いていればトグルで閉じる
+  else openMenu($btnMenu)
+})
 
 $openBtn.addEventListener('click', openFolder)
 $openPathBtn.addEventListener('click', openPathDialog)

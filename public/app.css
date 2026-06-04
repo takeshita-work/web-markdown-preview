@@ -8,6 +8,20 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 }
 #footer label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
 #footer select { font-size: 12px; padding: 2px 4px; }
+/* プレビュー中ファイルの情報（フッター・1行・左詰め・項目間は余白で区切る） */
+.file-info {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 16px;
+  overflow: hidden; font-size: 11px; color: #777;
+}
+/* コピーボタン + パスは近接させた1グループ */
+.file-info .fi-name { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 3px; }
+.file-info .fi-path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-info .fi-item { flex: 0 0 auto; white-space: nowrap; }
+.file-info .fi-copy {
+  flex: 0 0 auto; display: inline-flex; align-items: center; padding: 2px;
+  border: none; background: none; color: #888; cursor: pointer; border-radius: 3px;
+}
+.file-info .fi-copy:hover { background: #e3e3e3; color: #333; }
 
 /* ズーム操作を一体化（[−][100%][＋] を隙間なく連結） */
 .zoom-group { display: inline-flex; align-items: stretch; }
@@ -38,20 +52,27 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 /* ---- スプリッタ ---- */
 .splitter { position: relative; flex: 0 0 5px; cursor: col-resize; background: #e3e3e3; }
 .splitter:hover { background: #b9b9b9; }
-.splitter.collapsed { flex-basis: 10px; cursor: default; background: transparent; }
+/* 左の分割線は閉じたとき 0px にして線を消し、開閉ボタンだけを可視パネル端に残す */
+.splitter.collapsed { flex-basis: 0; cursor: default; background: transparent; }
 .splitter.collapsed:hover { background: transparent; }
+#split-left.collapsed > .split-handle { left: 0; right: auto; transform: none; }
+/* 右の分割線は閉じても線（幅）を残し、開閉ボタンは境界の中央に置く */
+#split-right.collapsed { flex-basis: 10px; }
 .split-handle {
-  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
   width: 9px; height: 28px; padding: 0; border: 1px solid #b5b5b5; border-radius: 5px;
   background: #d3d3d3; color: #555; font-size: 9px; line-height: 1; cursor: pointer;
   display: flex; align-items: center; justify-content: center; z-index: 5;
 }
 .split-handle:hover { background: #c2c2c2; }
+/* 右スプリッタはヘッダー(36px)の下の #content-row 内にあるため、その分だけ上に詰めて
+   左の開閉ボタンと画面上の高さを揃える（44px - 36px = 8px） */
+#collapse-right { top: 8px; }
 
 /* ---- 左: フォルダ操作 ---- */
 .open-bar {
   display: flex; flex-direction: row; align-items: center; gap: 6px;
-  padding: 6px 8px; border-bottom: 1px solid #eee; background: #f0f0f0; flex: 0 0 auto;
+  height: 36px; padding: 0 10px; border-bottom: 1px solid #eee; background: #f0f0f0; flex: 0 0 auto;
 }
 .open-bar button {
   font-size: 15px; line-height: 1; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px;
@@ -59,7 +80,7 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 }
 .open-bar button:hover:not(:disabled) { background: #e8e8e8; }
 .open-bar button:disabled { opacity: .45; cursor: default; }
-.root-name { flex: 1; font-size: 12px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.root-name { flex: 1; font-size: 14px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* モーダルダイアログ */
 .modal-overlay {
@@ -76,6 +97,8 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
   border: 1px solid #ccc; border-radius: 4px;
 }
 .modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.modal-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: #333; }
+.modal-note { font-size: 12px; color: #777; line-height: 1.6; }
 .tree-hint { padding: 12px; font-size: 12px; color: #999; line-height: 1.6; }
 
 /* ---- 左: ツリー ---- */
@@ -113,7 +136,7 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .outline-item.lv1 .o-text { font-weight: 600; }
 .outline-item.lv3 .o-text, .outline-item.lv4 .o-text { color: #555; }
 .outline-item.lv5 .o-text, .outline-item.lv6 .o-text { color: #777; }
-.outline-item.active { background: #c9ccd1; border-left-color: #6b7178; }
+.outline-item.active { background: #c9ccd1; }
 .outline-item.active:hover { background: #bcc0c6; }
 
 /* ---- メイン ---- */
@@ -122,7 +145,7 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 #content-row { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
 #toolbar {
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-bottom: 1px solid #ddd; background: #f7f7f7; overflow: hidden;
+  height: 36px; padding: 0 10px; border-bottom: 1px solid #ddd; background: #f7f7f7; overflow: hidden;
 }
 #toolbar label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
 #toolbar select { font-size: 12px; padding: 2px 4px; }
@@ -145,8 +168,8 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .tbtn:hover { background: #e8e8e8; }
 .tbtn.on { background: #d7ebff; border-color: #9cc6ee; }
 .tbtn:disabled { opacity: .4; cursor: default; }
-/* 終了ボタン（ツールバー右端・グレーアイコン） */
-#btn-quit { margin-left: auto; color: #555; }
+/* メニュー（ハンバーガー）ボタン: ヘッダー右端・グレーアイコン */
+#btn-menu { margin-left: auto; color: #555; }
 /* 確認ダイアログの実行ボタン（グレー） */
 .tbtn.danger { color: #fff; background: #6b7178; border-color: #5b6066; }
 .tbtn.danger:hover { background: #5b6066; }
@@ -157,8 +180,10 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
   border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: 4px 0;
   min-width: 170px; font-size: 13px;
 }
-.ctxmenu .mi { padding: 6px 14px; cursor: pointer; white-space: nowrap; }
+.ctxmenu .mi { padding: 6px 14px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
 .ctxmenu .mi:hover { background: #e3f0ff; }
+.ctxmenu .mi-icon { flex: 0 0 auto; display: inline-flex; align-items: center; color: #555; }
+.ctxmenu .mi-icon svg { display: block; }
 
 /* トースト */
 .toast {
@@ -190,3 +215,21 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 #preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
 #preview iframe.hidden { display: none; }
 #empty { display: flex; height: 100%; align-items: center; justify-content: center; color: #999; }
+/* ファイル取得中インジケータ（プレビュー上に重ねる） */
+.loading {
+  position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: rgba(255, 255, 255, 0.6); color: #555; font-size: 13px;
+}
+.loading[hidden] { display: none; }
+/* 回転スピナー（共通）。既定は小サイズ、プレビュー上では大きめにする */
+.spin {
+  box-sizing: border-box; flex: 0 0 auto;
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid #d3dae6; border-top-color: #2563eb;
+  animation: mdp-spin 0.8s linear infinite;
+}
+.loading .spin { width: 26px; height: 26px; border-width: 3px; }
+@keyframes mdp-spin { to { transform: rotate(360deg); } }
+/* ツリー（フォルダ / ファイル一覧）の取得中表示 */
+.tree-loading { display: flex; align-items: center; gap: 8px; padding: 12px; font-size: 12px; color: #777; }

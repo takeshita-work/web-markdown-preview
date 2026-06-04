@@ -3,3 +3,4 @@ package-lock.json
 public/bundle.js
 dist/
 build/preview-*.png
+config.json

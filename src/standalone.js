@@ -31,6 +31,23 @@ const isSea = (() => {
 // 起動情報（pid / port）の保存先。stop / status / 二重起動ガードで共有する
 const STATE_FILE = path.join(os.tmpdir(), `${APP}.json`)
 
+// 設定ファイル（ポートなどを永続化）。SEA は exe と同じフォルダ、dev はプロジェクト直下
+const CONFIG_FILE = isSea
+  ? path.join(path.dirname(process.execPath), 'config.json')
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'config.json')
+
+const validPort = (n) => Number.isInteger(n) && n >= 1 && n <= 65535
+function readConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))
+  } catch {
+    return {}
+  }
+}
+function writeConfig(obj) {
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(obj, null, 2) + '\n')
+}
+
 // ---- アセット ---------------------------------------------------------------
 
 // dev（非 SEA）時は public/ から読む。SEA 時は exe に埋め込んだアセットから読む
@@ -53,11 +70,33 @@ function readAsset(name) {
 
 // ---- ユーティリティ ---------------------------------------------------------
 
+// ポート解決順: --port 引数 > config.json > 環境変数 PORT > 既定
 function parsePort(args, def = 4321) {
   const i = args.findIndex((a) => a === '-p' || a === '--port')
   if (i >= 0 && args[i + 1]) return Number(args[i + 1])
+  const cfgPort = Number(readConfig().port)
+  if (validPort(cfgPort)) return cfgPort
   if (process.env.PORT) return Number(process.env.PORT)
   return def
+}
+
+// リクエストボディ(JSON)を読む（POST /__config 用）
+function readBody(req) {
+  return new Promise((resolve) => {
+    let d = ''
+    req.on('data', (c) => {
+      d += c
+      if (d.length > 1e6) req.destroy()
+    })
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(d || '{}'))
+      } catch {
+        resolve({})
+      }
+    })
+    req.on('error', () => resolve({}))
+  })
 }
 
 function readState() {
@@ -97,7 +136,7 @@ function selfArgs(extra) {
 // ---- サーバ（フォアグラウンド） ----------------------------------------------
 
 function serve(port) {
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     let p = (req.url || '/').split('?')[0]
     // アプリ画面からの終了要求: 応答を返してからプロセスを終了
     if (p === '/__shutdown') {
@@ -112,6 +151,63 @@ function serve(port) {
         } catch {}
         process.exit(0)
       }, 150)
+      return
+    }
+    // 設定（ポート）の取得 / 保存
+    if (p === '/__config') {
+      res.setHeader('Content-Type', 'application/json')
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        const np = Number(body.port)
+        if (!validPort(np)) {
+          res.statusCode = 400
+          res.end('{"ok":false,"error":"invalid port"}')
+          return
+        }
+        const cfg = readConfig()
+        cfg.port = np
+        try {
+          writeConfig(cfg)
+        } catch (e) {
+          res.statusCode = 500
+          res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) }))
+          return
+        }
+        res.end('{"ok":true}')
+        return
+      }
+      const cfg = readConfig()
+      res.end(
+        JSON.stringify({
+          port: validPort(Number(cfg.port)) ? Number(cfg.port) : port,
+          running: port,
+          canRestart: true,
+          configFile: CONFIG_FILE,
+        })
+      )
+      return
+    }
+    // 新しいポートで起動し直す（config.json の値を使用）
+    if (p === '/__restart' && req.method === 'POST') {
+      const cfg = readConfig()
+      const newPort = validPort(Number(cfg.port)) ? Number(cfg.port) : port
+      const child = spawn(process.execPath, selfArgs(['run', '--port', String(newPort)]), {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+      child.unref()
+      try {
+        fs.writeFileSync(STATE_FILE, JSON.stringify({ pid: child.pid, port: newPort }))
+      } catch {}
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ ok: true, url: `http://localhost:${newPort}` }))
+      setTimeout(() => {
+        try {
+          server.close()
+        } catch {}
+        process.exit(0)
+      }, 200)
       return
     }
     if (p === '/' || p === '') p = '/index.html'
