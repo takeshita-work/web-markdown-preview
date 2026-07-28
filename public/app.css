@@ -65,9 +65,6 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
   display: flex; align-items: center; justify-content: center; z-index: 5;
 }
 .split-handle:hover { background: #c2c2c2; }
-/* 右スプリッタはヘッダー(36px)の下の #content-row 内にあるため、その分だけ上に詰めて
-   左の開閉ボタンと画面上の高さを揃える（44px - 36px = 8px） */
-#collapse-right { top: 8px; }
 
 /* ---- 左: フォルダ操作 ---- */
 .open-bar {
@@ -141,12 +138,16 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 
 /* ---- メイン ---- */
 #main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
-/* ヘッダー下: メインコンテンツ + 右サイドバー */
 #content-row { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+/* ヘッダー（タブ行）+ プレビュー本体の列。ヘッダーはこの列の幅（＝メインコンテンツ幅）までで、
+   右サイドバー（見出し）の上には広がらない */
+#preview-col { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 #toolbar {
   display: flex; align-items: center; gap: 8px;
   height: 36px; padding: 0 10px; border-bottom: 1px solid #ddd; background: #f7f7f7; overflow: hidden;
 }
+/* 右サイドバー最上部: ヘッダーと高さを揃えるための空スペーサー（ラベルなし） */
+.pane-spacer { flex: 0 0 auto; height: 36px; border-bottom: 1px solid #ddd; background: #f7f7f7; }
 #toolbar label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
 #toolbar select { font-size: 12px; padding: 2px 4px; }
 #toggle-left, #toggle-right {
@@ -200,7 +201,11 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .tbtn svg,
 .open-bar button svg { display: block; }
 
-#tabs { display: flex; gap: 2px; overflow-x: auto; max-width: 55%; }
+#tabs {
+  display: flex; gap: 2px; overflow-x: auto; flex: 1 1 auto; min-width: 0;
+  scrollbar-width: none; /* Firefox: スクロールバー非表示（ホイールでの横スクロールは可） */
+}
+#tabs::-webkit-scrollbar { display: none; } /* Chrome / Edge: スクロールバー非表示 */
 .tab {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 8px; font-size: 12px; border: 1px solid #ddd; border-bottom: none;

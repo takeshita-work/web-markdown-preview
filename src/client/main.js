@@ -41,6 +41,10 @@ let defaultStdCss = '' // 既定 CSS のテキスト
 let defaultStdPath = '' // 既定 CSS のパス
 let lastTreeSig = '' // 直近に描画したツリー構成のシグネチャ（差分検知でちらつき防止）
 let refreshingTree = false // ツリー再走査の多重実行ガード
+// ファイル（+ ソース/レンダリング表示）ごとのスクロール位置。タブの再作成後も復元できるよう
+// tab オブジェクトではなくパス単位で保持する。
+const scrollPositions = new Map()
+const scrollPosKey = (tab) => tab.path + (tab.source ? '::source' : '::rendered')
 
 // 開いているタブ: path -> { iframe, label, path, handle, lastModified, blobUrls, headings, preview }
 const tabs = new Map()
@@ -48,8 +52,9 @@ let activePath = null
 let previewPath = null // 仮選択タブ（最大1つ。別ファイルの仮選択で置き換わる）
 
 // プレビュー対象の拡張子
-const PREVIEWABLE = /\.(md|pdf)$/i
+const PREVIEWABLE = /\.(md|pdf|html?)$/i
 const isPdfPath = (p) => /\.pdf$/i.test(p)
+const isHtmlPath = (p) => /\.html?$/i.test(p)
 
 // ズームはタブごと・表示モード（rendered/source）ごとに保持（各既定 100%）
 
@@ -75,6 +80,9 @@ const $collapseLeft = document.getElementById('collapse-left')
 const $collapseRight = document.getElementById('collapse-right')
 const $btnSource = document.getElementById('btn-source')
 const $btnPrint = document.getElementById('btn-print')
+const $btnReload = document.getElementById('btn-reload')
+const $btnBack = document.getElementById('btn-back')
+const $btnForward = document.getElementById('btn-forward')
 const $btnMenu = document.getElementById('btn-menu')
 const $fileInfo = document.getElementById('file-info')
 const $loading = document.getElementById('loading')
@@ -110,6 +118,8 @@ const ICONS = {
   markdown: `<svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="3.5" width="14" height="9" rx="2" fill="#2563eb"/><path d="M3.7 10V6l2 2.4L7.7 6v4M11 6v3.3M9.6 8.1 11 9.7 12.4 8.1" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
   // PDF: 赤の角丸バッジ + 白の「PDF」表記
   pdf: `<svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="3.5" width="14" height="9" rx="2" fill="#e0392b"/><text x="8" y="10.35" font-size="5.2" font-weight="700" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" letter-spacing="-.3">PDF</text></svg>`,
+  // HTML: 橙の角丸バッジ + 白の「HTML」表記
+  html: `<svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="3.5" width="14" height="9" rx="2" fill="#e07b2b"/><text x="8" y="10.35" font-size="4.4" font-weight="700" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" letter-spacing="-.3">HTML</text></svg>`,
   // フォルダ: タブ付きの閉じたフォルダ
   folder: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.1a1 1 0 0 1 .72.3l.86.9a1 1 0 0 0 .72.3h5.6a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>`,
   // プリンター
@@ -118,13 +128,19 @@ const ICONS = {
   menu: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg>`,
   // 設定（歯車・ティース付きコグ。中心穴はマスクで抜く）
   gear: `<svg viewBox="0 0 16 16" width="14" height="14"><defs><rect id="ct" x="7.05" y="0.7" width="1.9" height="3.6" rx=".5"/><mask id="cm"><rect width="16" height="16" fill="#fff"/><circle cx="8" cy="8" r="1.7" fill="#000"/></mask></defs><g fill="currentColor" mask="url(#cm)"><circle cx="8" cy="8" r="4.2"/><use href="#ct"/><use href="#ct" transform="rotate(45 8 8)"/><use href="#ct" transform="rotate(90 8 8)"/><use href="#ct" transform="rotate(135 8 8)"/><use href="#ct" transform="rotate(180 8 8)"/><use href="#ct" transform="rotate(225 8 8)"/><use href="#ct" transform="rotate(270 8 8)"/><use href="#ct" transform="rotate(315 8 8)"/></g></svg>`,
+  // 再読み込み（円弧矢印）
+  reload: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3.6h-3.6"/></svg>`,
+  // 戻る / 進む（矢印）
+  back: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5 4 8l5.5 4.5"/><path d="M4.3 8h8.2"/></svg>`,
+  forward: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 12 8l-5.5 4.5"/><path d="M11.7 8H3.5"/></svg>`,
   // 電源（終了）
   power: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.4a5 5 0 1 0 6.6 0"/></svg>`,
   // コピー（クリップボード）
   copy: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v1"/></svg>`,
 }
 // 拡張子に応じたファイルアイコン（SVG マークアップを返す）
-const fileIcon = (name) => (isPdfPath(name) ? ICONS.pdf : /\.md$/i.test(name) ? ICONS.markdown : ICONS.file)
+const fileIcon = (name) =>
+  isPdfPath(name) ? ICONS.pdf : isHtmlPath(name) ? ICONS.html : /\.md$/i.test(name) ? ICONS.markdown : ICONS.file
 
 // ---- フォルダ選択 & 走査 -----------------------------------------------------
 
@@ -144,11 +160,12 @@ async function openFolder() {
 async function loadRoot() {
   $rootName.textContent = rootHandle.name
   $openPathBtn.disabled = false // フォルダ選択後は相対パス指定を有効化
-  fileMap.clear()
   for (const p of [...tabs.keys()]) closeTab(p)
   // ディレクトリ走査中はツリー領域に取得中インジケータを表示（renderTree で置き換わる）
   $tree.innerHTML = '<div class="tree-loading"><span class="spin"></span><span>取得中</span></div>'
-  const tree = await buildTree(rootHandle, rootHandle.name, '')
+  const newMap = new Map()
+  const tree = await buildTree(rootHandle, rootHandle.name, '', newMap)
+  swapFileMap(newMap)
   lastTreeSig = treeSignature(tree)
   renderTree(tree) // 初期はすべて折りたたみ
   await classifyCss()
@@ -183,8 +200,9 @@ async function refreshTree() {
   if (!rootHandle || refreshingTree) return
   refreshingTree = true
   try {
-    fileMap.clear()
-    const tree = await buildTree(rootHandle, rootHandle.name, '')
+    const newMap = new Map()
+    const tree = await buildTree(rootHandle, rootHandle.name, '', newMap)
+    swapFileMap(newMap)
     const sig = treeSignature(tree)
     if (sig === lastTreeSig) return // 構成に変化なし（fileMap のハンドルだけ新しくして終了）
     lastTreeSig = sig
@@ -272,7 +290,9 @@ function openPathDialog() {
   input.focus()
 }
 
-async function buildTree(dirHandle, name, relPath) {
+// map には fileMap を直接渡さず、呼び出し側で完成後にまとめて差し替える
+// （walk 中は非同期の間隙があり、fileMap を直接クリアすると解決処理と競合するため）。
+async function buildTree(dirHandle, name, relPath, map) {
   const node = { type: 'dir', name, path: relPath, children: [] }
   const entries = []
   for await (const [childName, h] of dirHandle.entries()) entries.push([childName, h])
@@ -286,13 +306,22 @@ async function buildTree(dirHandle, name, relPath) {
     const childRel = relPath ? relPath + '/' + childName : childName
     if (h.kind === 'directory') {
       if (childName === 'node_modules' || childName === '.git') continue
-      node.children.push(await buildTree(h, childName, childRel))
+      node.children.push(await buildTree(h, childName, childRel, map))
     } else {
-      fileMap.set(childRel, h)
+      map.set(childRel, h)
       node.children.push({ type: 'file', name: childName, path: childRel, handle: h })
     }
   }
   return node
+}
+
+// walk 完了後の新しい内容へ、同期的に（await を挟まず）まとめて差し替える。
+// fileMap を直接 clear() してから再構築すると、walk 中の非同期区間で
+// resolveLocalImagePath などの参照が一時的に解決できなくなる（レンダリング中の
+// 相対パス解決が偶発的に失敗する）ため、完成した内容を一括で反映する。
+function swapFileMap(newMap) {
+  fileMap.clear()
+  for (const [k, v] of newMap) fileMap.set(k, v)
 }
 
 async function classifyCss() {
@@ -424,7 +453,7 @@ function renderTree(tree, expanded = null) {
     if (el) $tree.appendChild(el)
   }
   if (!$tree.children.length) {
-    $tree.innerHTML = '<div class="tree-hint">.md / .pdf ファイルが見つかりませんでした。</div>'
+    $tree.innerHTML = '<div class="tree-hint">.md / .html / .pdf ファイルが見つかりませんでした。</div>'
   }
 }
 
@@ -512,17 +541,23 @@ function frontmatterLineCount(src) {
   return m ? m[0].split(/\r?\n/).length - 1 : 0
 }
 
-async function toBlobUrl(src, baseDir, store) {
+// 相対画像パスをディレクトリ配下の実ファイルへ解決（blob 化はしない）。
+// 外部 URL / data: / blob: / アンカー / 絶対パスは対象外（null）。
+function resolveLocalImagePath(src, baseDir) {
   if (!src || /^(https?:|data:|blob:|#|\/)/i.test(src)) return null
   let decoded = src
   try {
     decoded = decodeURI(src)
   } catch {}
   const resolved = resolvePath(baseDir, decoded)
-  const h = fileMap.get(resolved)
-  if (!h) return null
+  return fileMap.has(resolved) ? resolved : null
+}
+
+async function toBlobUrl(src, baseDir, store) {
+  const resolved = resolveLocalImagePath(src, baseDir)
+  if (!resolved) return null
   try {
-    const url = URL.createObjectURL(await h.getFile())
+    const url = URL.createObjectURL(await fileMap.get(resolved).getFile())
     store.push(url)
     return url
   } catch {
@@ -530,12 +565,55 @@ async function toBlobUrl(src, baseDir, store) {
   }
 }
 
+// 実行時に script が相対パスで src を設定する要素（video/audio 等）用のブートストラップ。
+// 静的な img/link/script は上のループで解決済みだが、レポート HTML などが
+// フォルダ内マニフェストを読んで <video> を動的生成するケースは事前解決できないため、
+// プロトタイプの src セッターを差し替えて親フレームへ postMessage で解決を依頼する。
+function dynamicResolverScript(baseDir) {
+  return `(function(){
+  var BASE=${JSON.stringify(baseDir)},seq=0,pending={};
+  window.addEventListener('message',function(e){
+    var d=e.data;if(!d||d.__mdpResolved!==true)return;
+    var cb=pending[d.id];if(!cb)return;delete pending[d.id];cb(d.url);
+  });
+  function patch(proto){
+    if(!proto)return;
+    var desc=Object.getOwnPropertyDescriptor(proto,'src');
+    if(!desc||!desc.set)return;
+    Object.defineProperty(proto,'src',{configurable:true,enumerable:desc.enumerable,get:desc.get,set:function(v){
+      if(typeof v==='string'&&v&&!/^([a-zA-Z][a-zA-Z0-9+.-]*:|#|\\/)/.test(v)){
+        var self=this,id='r'+(seq++);
+        pending[id]=function(url){desc.set.call(self,url||v)};
+        window.parent.postMessage({__mdpResolve:true,id:id,path:v,baseDir:BASE},'*');
+        return;
+      }
+      desc.set.call(this,v);
+    }});
+  }
+  patch(window.HTMLImageElement&&window.HTMLImageElement.prototype);
+  patch(window.HTMLMediaElement&&window.HTMLMediaElement.prototype);
+  patch(window.HTMLSourceElement&&window.HTMLSourceElement.prototype);
+})();`
+}
+
 async function resolveImages(htmlString, baseDir, store) {
   const doc = new DOMParser().parseFromString(htmlString, 'text/html')
+  // 上記ブートストラップを <head> 先頭に差し込み、文書自身のスクリプトより先に実行させる
+  const boot = doc.createElement('script')
+  boot.textContent = dynamicResolverScript(baseDir)
+  if (doc.head) doc.head.insertBefore(boot, doc.head.firstChild)
+  // 相対画像は即 blob 化せず data-mdp-src に退避し、表示領域に近づいた時だけ
+  // 読み込む（大量画像でメモリが枯渇して読み込まれない問題への対策）。
   for (const img of doc.querySelectorAll('img[src]')) {
-    const url = await toBlobUrl(img.getAttribute('src'), baseDir, store)
-    if (url) img.setAttribute('src', url)
+    const resolved = resolveLocalImagePath(img.getAttribute('src'), baseDir)
+    if (resolved) {
+      img.setAttribute('data-mdp-src', resolved)
+      img.removeAttribute('src')
+      img.setAttribute('loading', 'lazy')
+      img.setAttribute('decoding', 'async')
+    }
   }
+  // style の背景画像（url(...)）は数が少ない想定のため従来どおり即時解決。
   for (const el of doc.querySelectorAll('[style*="url("]')) {
     const s = el.getAttribute('style')
     const m = s.match(/url\((['"]?)([^'")]+)\1\)/)
@@ -544,7 +622,68 @@ async function resolveImages(htmlString, baseDir, store) {
       if (url) el.setAttribute('style', s.replace(m[0], `url("${url}")`))
     }
   }
+  // 生 HTML が参照する相対 CSS / JS もローカルファイルから解決（数が少ない想定で即時解決）
+  for (const el of doc.querySelectorAll('link[href]')) {
+    const url = await toBlobUrl(el.getAttribute('href'), baseDir, store)
+    if (url) el.setAttribute('href', url)
+  }
+  for (const el of doc.querySelectorAll('script[src]')) {
+    const url = await toBlobUrl(el.getAttribute('src'), baseDir, store)
+    if (url) el.setAttribute('src', url)
+  }
   return '<!doctype html>' + doc.documentElement.outerHTML
+}
+
+// 遅延画像: 表示領域に入ったら blob を生成、離れたら解放してメモリを一定に保つ。
+async function loadLazyImg(img, tab) {
+  if (img.__mdpBlob || img.__mdpLoading) return
+  const p = img.getAttribute('data-mdp-src')
+  const h = p && fileMap.get(p)
+  if (!h) return
+  img.__mdpLoading = true
+  try {
+    const url = URL.createObjectURL(await h.getFile())
+    img.__mdpBlob = url
+    img.src = url
+  } catch {
+  } finally {
+    img.__mdpLoading = false
+  }
+}
+function unloadLazyImg(img) {
+  if (img.__mdpBlob) {
+    URL.revokeObjectURL(img.__mdpBlob)
+    img.__mdpBlob = null
+    img.removeAttribute('src')
+  }
+}
+// タブの遅延画像リソース（Observer + 生成済み blob）を破棄。
+function disposeLazyImages(tab) {
+  if (tab.imgObserver) {
+    tab.imgObserver.disconnect()
+    tab.imgObserver = null
+  }
+  try {
+    const doc = tab.iframe.contentDocument
+    if (doc) for (const img of doc.querySelectorAll('img[data-mdp-src]')) unloadLazyImg(img)
+  } catch {}
+}
+// 印刷/PDF 出力前に、まだ読み込んでいない遅延画像をすべて読み込んで待つ。
+async function ensureLazyImagesLoaded(tab) {
+  const doc = tab.iframe.contentDocument
+  if (!doc) return
+  const imgs = [...doc.querySelectorAll('img[data-mdp-src]')].filter((im) => !im.__mdpBlob)
+  await Promise.all(
+    imgs.map(async (img) => {
+      await loadLazyImg(img, tab)
+      if (img.__mdpBlob && !img.complete) {
+        await new Promise((res) => {
+          img.addEventListener('load', res, { once: true })
+          img.addEventListener('error', res, { once: true })
+        })
+      }
+    })
+  )
 }
 
 async function buildDocument(tab, src) {
@@ -570,6 +709,13 @@ async function buildDocument(tab, src) {
     return `<!doctype html><html><head><meta charset="utf-8">
 <style>body{margin:0;} pre{margin:0;padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}</style>
 </head><body><pre>${body}</pre></body></html>`
+  }
+
+  // 生 HTML ファイルはレンダリングせずそのまま表示（相対 img/link/script/背景画像だけローカル解決）
+  if (isHtmlPath(tab.path)) {
+    for (const u of tab.blobUrls) URL.revokeObjectURL(u)
+    tab.blobUrls = []
+    return resolveImages(src, baseDir, tab.blobUrls)
   }
 
   // タブごとに保持した表示設定から モード / marpテーマ / 標準CSS を解決
@@ -683,6 +829,7 @@ async function renderTab(tab, autoScroll) {
       // PDF はブラウザ標準ビューアで表示（blob URL）
       tab.lineCount = null // PDF は行数 / 文字数を持たない
       tab.charCount = null
+      disposeLazyImages(tab)
       for (const u of tab.blobUrls) URL.revokeObjectURL(u)
       tab.blobUrls = []
       const url = URL.createObjectURL(file)
@@ -708,6 +855,7 @@ async function renderTab(tab, autoScroll) {
         tab.scrollToLine = null
       }
       tab.prevSrc = src
+      disposeLazyImages(tab) // 旧ドキュメントの遅延画像 blob を解放してから差し替え
       tab.iframe.removeAttribute('src')
       tab.iframe.srcdoc = await buildDocument(tab, src)
       if (tab.path === activePath) syncPreview() // セレクトを初期 view に同期
@@ -735,6 +883,40 @@ function onIframeLoad(tab) {
   const doc = tab.iframe.contentDocument
   if (!doc) return
   applyZoomToTab(tab)
+  // 遅延画像: 表示領域（先読みマージン付き）に入った画像だけ blob 化する
+  disposeLazyImages(tab)
+  const lazyImgs = doc.querySelectorAll('img[data-mdp-src]')
+  if (lazyImgs.length) {
+    // marp はスライドを SVG <foreignObject> 内に描画し、その中の img は
+    // IntersectionObserver で交差判定できない。img を含むスライドの svg を
+    // 監視対象にし、可視スライドの画像をまとめて読み込む。標準 md は img 単位。
+    const groups = new Map() // 監視要素 -> 配下 img[]
+    for (const img of lazyImgs) {
+      const key = img.closest('svg') || img
+      let arr = groups.get(key)
+      if (!arr) groups.set(key, (arr = []))
+      arr.push(img)
+    }
+    // iframe 内スクロールを基準にするため IntersectionObserver は iframe 側で生成
+    const IO = tab.iframe.contentWindow.IntersectionObserver || IntersectionObserver
+    // 表示領域に近づいたら読み込む（大量画像の同時ロードを避けるため）。
+    // 一度読み込んだ画像は解放しない。タブ切替は iframe を display:none にするだけで
+    // 全 svg が非交差になるため、ここで解放するとタブを戻した際に画像が消えてしまう。
+    // 解放はタブを閉じる/再レンダリング時（disposeLazyImages）にのみ行う。
+    const io = new IO(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue
+          const imgs = groups.get(e.target)
+          if (!imgs) continue
+          for (const img of imgs) loadLazyImg(img, tab)
+        }
+      },
+      { root: null, rootMargin: '1200px 0px' }
+    )
+    for (const key of groups.keys()) io.observe(key)
+    tab.imgObserver = io
+  }
   // Ctrl + ホイールで拡大縮小（iframe 内で発生するため iframe 文書側で購読）
   doc.addEventListener(
     'wheel',
@@ -747,8 +929,12 @@ function onIframeLoad(tab) {
   )
   doc.addEventListener('keydown', handleZoomKey) // iframe 内フォーカス時のショートカット
   doc.addEventListener('keydown', handlePrintKey) // iframe 内で Ctrl+P
-  // リンク: 外部 → ブラウザ別タブ / 内部 → アプリ内タブ
-  doc.addEventListener('click', (e) => handleLinkClick(e, tab))
+  // リンク: 外部 → ブラウザ別タブ / 内部 → 通常クリックは同じタブで遷移
+  doc.addEventListener('click', (e) => handleLinkClick(e, tab, false))
+  // ホイール（中）クリック → 新しいタブで開く（'click' ではなく 'auxclick' で発火）
+  doc.addEventListener('auxclick', (e) => {
+    if (e.button === 1) handleLinkClick(e, tab, true)
+  })
   // メインコンテンツ右クリック: ソース切替/コピー等のメニュー
   doc.addEventListener('contextmenu', (e) => {
     e.preventDefault()
@@ -765,8 +951,10 @@ function onIframeLoad(tab) {
     if (h.dataset.mdpLevel) text = text.replace(/^#{1,6}\s+/, '') // ソースは先頭の # を除去
     return { level, text, id: h.id }
   })
-  // スクロール追従ハイライト（iframe 文書のスクロールを購読）
+  // スクロール追従ハイライト（iframe 文書のスクロールを購読）+ 位置の記憶
+  const sc = doc.scrollingElement || doc.documentElement
   const onScroll = () => {
+    scrollPositions.set(scrollPosKey(tab), sc.scrollTop)
     if (tab.path === activePath) updateActiveHeading(tab)
   }
   doc.addEventListener('scroll', onScroll, { passive: true, capture: true })
@@ -779,7 +967,26 @@ function onIframeLoad(tab) {
   if (tab.scrollToLine != null) {
     scrollToLine(doc, tab.scrollToLine, tab.scrollHighlight !== false)
     tab.scrollToLine = null
+  } else {
+    // タブの再作成・再読み込みでも、そのファイル（表示モード）の直前のスクロール位置を復元
+    restoreScrollPosition(tab)
   }
+}
+
+// 保存済みのスクロール位置をタブへ復元（レイアウト確定を待って反映）
+function restoreScrollPosition(tab) {
+  if (!tab || isPdfPath(tab.path)) return
+  const doc = tab.iframe.contentDocument
+  if (!doc) return
+  const saved = scrollPositions.get(scrollPosKey(tab))
+  if (saved == null) return
+  const sc = doc.scrollingElement || doc.documentElement
+  const win = doc.defaultView
+  const restore = () => {
+    sc.scrollTop = saved
+  }
+  if (win && win.requestAnimationFrame) win.requestAnimationFrame(() => win.requestAnimationFrame(restore))
+  else restore()
 }
 
 // data-line を持つ要素のうち、指定行に最も近い箇所へスクロール
@@ -830,7 +1037,8 @@ function highlightEl(el) {
 
 const isExternalHref = (href) => /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')
 
-function handleLinkClick(e, tab) {
+// newTab: false = 通常クリック（同じタブ内で遷移・履歴に積む）/ true = ホイールクリック（新しいタブで開く）
+function handleLinkClick(e, tab, newTab) {
   // iframe 内要素は親レルムの Element ではないため instanceof は使わない
   let el = e.target
   if (el && el.nodeType === 3) el = el.parentElement // テキストノード → 親要素
@@ -858,9 +1066,11 @@ function handleLinkClick(e, tab) {
   if (!h) return // フォルダ外 / 未検出は無視
   const node = { type: 'file', name: resolved.split('/').pop(), path: resolved, handle: h }
   if (PREVIEWABLE.test(resolved)) {
-    // 元タブが仮選択なら確定にしてから、リンク先を仮選択で開く
-    if (tab.preview) pinTabByPath(tab.path)
-    previewFile(node)
+    if (newTab) {
+      pinFile(node) // ホイールクリック: 新しいタブとして開く（既に開いていれば切替）
+    } else {
+      navigateTabTo(tab, node, true) // 通常クリック: 同じタブのまま遷移
+    }
   } else {
     // 画像など非対応ファイルはブラウザ別タブで
     h.getFile()
@@ -1171,11 +1381,21 @@ function showContentMenu(x, y, tab) {
 }
 
 // アクティブタブのコンテンツのみ印刷（ブラウザのダイアログで PDF 保存可）
-function printActiveTab() {
+async function printActiveTab() {
   const t = tabs.get(activePath)
   if (!t || !t.iframe.contentWindow) return
+  await ensureLazyImagesLoaded(t) // 遅延読み込み画像を印刷前に全て読み込む
+  if (!t.iframe.contentWindow) return // 待機中にタブが閉じられた場合
   t.iframe.contentWindow.focus()
   t.iframe.contentWindow.print()
+}
+
+// アクティブタブを強制的に再読み込み・再描画（更新未検出やレンダリング失敗時の手動リカバリ用）
+function reloadActiveTab() {
+  const t = tabs.get(activePath)
+  if (!t) return
+  refreshTree() // フォルダ内容も念のため最新化（変化が無ければ再描画をスキップ）
+  renderTab(t)
 }
 
 // Ctrl+P / Cmd+P でアプリ全体ではなくアクティブコンテンツを印刷
@@ -1319,7 +1539,11 @@ function handleZoomKey(e) {
 function openTab(node, preview) {
   const iframe = document.createElement('iframe')
   iframe.className = 'hidden'
-  const tab = { iframe, label: node.name, path: node.path, handle: node.handle, lastModified: 0, blobUrls: [], headings: [], preview: !!preview, view: '', defaultView: '', source: false, zoom: { rendered: 1, source: 1 } }
+  const tab = {
+    iframe, label: node.name, path: node.path, handle: node.handle, lastModified: 0, blobUrls: [], headings: [],
+    preview: !!preview, view: '', defaultView: '', source: false, zoom: { rendered: 1, source: 1 },
+    history: [node.path], historyIndex: 0, // タブ内リンク遷移の履歴（[←][→] 用）
+  }
   iframe.addEventListener('load', () => onIframeLoad(tab))
   $preview.appendChild(iframe)
   tabs.set(node.path, tab)
@@ -1350,6 +1574,64 @@ function pinFile(node) {
   renderTabs()
 }
 
+// タブ内リンク遷移: タブ（iframe）はそのままに表示中のファイルだけを差し替える。
+// pushHistory=true は通常のリンククリック（履歴に積む）、false は [←][→] による履歴移動。
+// 戻り値: 実際に遷移したか（呼び出し元が historyIndex の巻き戻し判断に使う）。
+function navigateTabTo(tab, node, pushHistory) {
+  if (!tab || node.path === tab.path) return true
+  // 遷移先が既に「別の」タブとして開かれている場合は、そちらへ切替える
+  // （tabs は path をキーにした Map のため、同じ path で二重登録すると片方が孤立する）
+  const existing = tabs.get(node.path)
+  if (existing && existing !== tab) {
+    activateTab(node.path)
+    return false
+  }
+  const oldPath = tab.path
+  if (pushHistory) {
+    const hist = (tab.history || [oldPath]).slice(0, (tab.historyIndex || 0) + 1)
+    hist.push(node.path)
+    tab.history = hist
+    tab.historyIndex = hist.length - 1
+  }
+  tabs.delete(oldPath)
+  tab.path = node.path
+  tab.label = node.name
+  tab.handle = node.handle
+  tab.lastModified = 0
+  tab.prevSrc = null
+  tab.scrollToLine = null
+  tab.headings = []
+  tab.view = ''
+  tab.defaultView = ''
+  tabs.set(node.path, tab)
+  if (activePath === oldPath) activePath = node.path
+  if (previewPath === oldPath) previewPath = tab.preview ? node.path : null
+  setChecked(oldPath, false)
+  if (!tab.preview) setChecked(node.path, true)
+  renderTabs()
+  syncPreview()
+  renderTab(tab)
+  return true
+}
+
+// アクティブタブの履歴を dir 分移動（-1: 戻る, +1: 進む）
+function navigateHistory(dir) {
+  const t = tabs.get(activePath)
+  if (!t || !t.history) return
+  const idx = (t.historyIndex || 0) + dir
+  if (idx < 0 || idx >= t.history.length) return
+  const path = t.history[idx]
+  const h = fileMap.get(path)
+  if (!h) {
+    toast('ファイルが見つかりません: ' + path)
+    return
+  }
+  const prevIndex = t.historyIndex
+  t.historyIndex = idx
+  const ok = navigateTabTo(t, { type: 'file', name: path.split('/').pop(), path, handle: h }, false)
+  if (!ok) t.historyIndex = prevIndex // 遷移できなかった場合は履歴位置を巻き戻す
+}
+
 function setChecked(path, checked) {
   const cb = document.querySelector(`.file-label[data-path="${cssEsc(path)}"] input`)
   if (cb) cb.checked = checked
@@ -1358,6 +1640,7 @@ function setChecked(path, checked) {
 function closeTab(path) {
   const t = tabs.get(path)
   if (!t) return
+  disposeLazyImages(t)
   for (const u of t.blobUrls) URL.revokeObjectURL(u)
   t.iframe.remove()
   tabs.delete(path)
@@ -1385,6 +1668,8 @@ function syncPreview() {
   if (activePath) revealInTree(activePath) // ツリーで該当ファイルまで展開・表示
   // 「表示」セレクトをアクティブタブの設定に同期（無い選択肢なら既定 CSS）
   const at = tabs.get(activePath)
+  // display:none ⇔ block の切替だけでは反映されない環境があるため、表示のたびに明示的に復元
+  restoreScrollPosition(at)
   // タブタイトルをプレビュー中のファイル名に追従（未選択時は既定へ戻す）
   document.title = at ? tabDisplayLabel(activePath) : DEFAULT_TITLE
   $view.value = at && [...$view.options].some((o) => o.value === at.view) ? at.view : defaultViewValue()
@@ -1393,6 +1678,8 @@ function syncPreview() {
   const isMd = !!at && !isPdfPath(at.path)
   $btnSource.classList.toggle('on', !!(at && at.source))
   $btnSource.disabled = !isMd
+  $btnBack.disabled = !at || !at.history || (at.historyIndex || 0) <= 0
+  $btnForward.disabled = !at || !at.history || (at.historyIndex || 0) >= at.history.length - 1
   updateZoomUI() // ズーム UI をアクティブタブの現在モードに同期
   updateFileInfo() // フッターのファイル情報をアクティブタブに同期
   if (!tabs.size) $outline.innerHTML = '<div class="tree-hint">見出しがありません。</div>'
@@ -1451,15 +1738,17 @@ function updateFileInfo() {
   $fileInfo.title = [shown, ...items].join('   ')
 }
 
-// 同名ファイルが複数開かれているタブは親ディレクトリ名を付けて区別
+// 同名ファイルが複数開かれているタブは親ディレクトリ名を付けて区別する。
+// 直上の1階層だけでも同名になる場合は、一意になるまでさらに上の階層を足していく。
 function tabDisplayLabel(path) {
-  const name = path.split('/').pop()
-  let dup = 0
-  for (const p of tabs.keys()) if (p.split('/').pop() === name) dup++
-  if (dup <= 1) return name
-  const dir = posixDirname(path)
-  const parent = dir ? dir.split('/').pop() : ''
-  return parent ? `${parent}/${name}` : name
+  const segs = path.split('/')
+  const others = [...tabs.keys()].filter((p) => p !== path)
+  for (let n = 1; n <= segs.length; n++) {
+    const label = segs.slice(-n).join('/')
+    const collides = others.some((p) => p.split('/').slice(-n).join('/') === label)
+    if (!collides) return label
+  }
+  return path
 }
 
 function renderTabs() {
@@ -1595,6 +1884,31 @@ function updateActiveHeading(tab) {
   const activeRow = tab.rowById.get(currentId)
   if (activeRow) activeRow.scrollIntoView({ block: 'nearest' })
 }
+
+// ---- HTML プレビュー内の動的パス解決（dynamicResolverScript からの依頼に応答） --------
+
+window.addEventListener('message', async (e) => {
+  const d = e.data
+  if (!d || d.__mdpResolve !== true) return
+  let tab = null
+  for (const t of tabs.values()) {
+    if (t.iframe.contentWindow === e.source) {
+      tab = t
+      break
+    }
+  }
+  if (!tab) return
+  const resolved = resolveLocalImagePath(d.path, d.baseDir)
+  const h = resolved && fileMap.get(resolved)
+  let url = null
+  if (h) {
+    try {
+      url = URL.createObjectURL(await h.getFile())
+      tab.blobUrls.push(url)
+    } catch {}
+  }
+  e.source.postMessage({ __mdpResolved: true, id: d.id, url }, '*')
+})
 
 // ---- ライブリロード（ポーリング） --------------------------------------------
 
@@ -1744,6 +2058,9 @@ function setupSplitters() {
 $openBtn.innerHTML = ICONS.folder
 $openPathBtn.innerHTML = ICONS.file
 $btnPrint.innerHTML = ICONS.printer
+$btnReload.innerHTML = ICONS.reload
+$btnBack.innerHTML = ICONS.back
+$btnForward.innerHTML = ICONS.forward
 $btnMenu.innerHTML = ICONS.menu
 $btnMenu.addEventListener('click', (e) => {
   e.stopPropagation() // document の click→hideCtx で即閉じしないように
@@ -1753,6 +2070,16 @@ $btnMenu.addEventListener('click', (e) => {
 
 $openBtn.addEventListener('click', openFolder)
 $openPathBtn.addEventListener('click', openPathDialog)
+// タブ一覧: 縦ホイールでも横スクロールできるようにする（スクロールバーは CSS で非表示）
+$tabs.addEventListener(
+  'wheel',
+  (e) => {
+    if (!$tabs.scrollWidth || $tabs.scrollWidth <= $tabs.clientWidth) return
+    e.preventDefault()
+    $tabs.scrollLeft += e.deltaY !== 0 ? e.deltaY : e.deltaX
+  },
+  { passive: false }
+)
 // 開閉はスプリッタのドラッグ判定（makeDrag の onToggle）で処理する
 // 「表示」変更はアクティブなタブにのみ適用・保持する
 $view.addEventListener('change', () => {
@@ -1775,6 +2102,9 @@ $btnSource.addEventListener('click', () => {
   renderTab(t)
 })
 $btnPrint.addEventListener('click', printActiveTab)
+$btnReload.addEventListener('click', reloadActiveTab)
+$btnBack.addEventListener('click', () => navigateHistory(-1))
+$btnForward.addEventListener('click', () => navigateHistory(1))
 
 restoreLayout()
 setupSplitters()

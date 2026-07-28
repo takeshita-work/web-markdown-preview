@@ -14,6 +14,7 @@
       <aside id="sidebar">
         <div class="open-bar">
           <span id="root-name" class="root-name">-</span>
+          <button id="open-folder" title="フォルダを選択"></button>
         </div>
         <!-- ファイルツリー -->
         <div id="tree-pane">
@@ -27,23 +28,29 @@
 
       <!-- センター（ヘッダー=タブのみ + 下にコンテンツと右サイドバー） -->
       <main id="main">
-        <div id="toolbar">
-          <button id="open-folder" class="tbtn" title="フォルダを選択"></button>
-          <button id="open-path" class="tbtn" disabled title="ファイルを選択"></button>
-          <div id="tabs"></div>
-          <button id="btn-menu" class="tbtn" title="メニュー"></button>
-        </div>
         <div id="content-row">
-          <div id="preview">
-            <div id="empty">.md, .pdf を選択してください。</div>
-            <div id="loading" class="loading" hidden>
-              <span class="spin"></span>
-              <span>取得中</span>
+          <!-- ヘッダー（タブ行）はメインコンテンツの幅までとし、右サイドバーの上には広げない -->
+          <div id="preview-col">
+            <div id="toolbar">
+              <button id="btn-back" class="tbtn" title="戻る" disabled></button>
+              <button id="btn-forward" class="tbtn" title="進む" disabled></button>
+              <button id="btn-reload" class="tbtn" title="再読み込み（レンダリング失敗・更新未反映時に）"></button>
+              <button id="open-path" class="tbtn" disabled title="ファイルを選択"></button>
+              <div id="tabs"></div>
+              <button id="btn-menu" class="tbtn" title="メニュー"></button>
+            </div>
+            <div id="preview">
+              <div id="empty">.md, .html, .pdf を選択してください。</div>
+              <div id="loading" class="loading" hidden>
+                <span class="spin"></span>
+                <span>取得中</span>
+              </div>
             </div>
           </div>
           <div class="splitter" id="split-right" title="ドラッグで幅変更"><button class="split-handle" id="collapse-right" title="見出しを非表示">›</button></div>
           <!-- 右サイドバー: 見出し -->
           <aside id="sidebar-right">
+            <div class="pane-spacer"></div>
             <div id="outline">
               <div class="tree-hint">見出しがありません。</div>
             </div>
