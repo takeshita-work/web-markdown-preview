@@ -44,7 +44,7 @@ let refreshingTree = false // ツリー再走査の多重実行ガード
 // ファイル（+ ソース/レンダリング表示）ごとのスクロール位置。タブの再作成後も復元できるよう
 // tab オブジェクトではなくパス単位で保持する。
 const scrollPositions = new Map()
-const scrollPosKey = (tab) => tab.path + (tab.source ? '::source' : '::rendered')
+const scrollPosKey = (tab, path) => (path ?? tab.path) + (tab.source ? '::source' : '::rendered')
 
 // 開いているタブ: path -> { iframe, label, path, handle, lastModified, blobUrls, headings, preview }
 const tabs = new Map()
@@ -631,6 +631,16 @@ async function resolveImages(htmlString, baseDir, store) {
     const url = await toBlobUrl(el.getAttribute('src'), baseDir, store)
     if (url) el.setAttribute('src', url)
   }
+  // HTML に直接書かれた video/audio/source の src、video の poster も解決
+  // （実行時に script が動的生成する場合は上のブートストラップが担当）
+  for (const el of doc.querySelectorAll('video[src], audio[src], source[src]')) {
+    const url = await toBlobUrl(el.getAttribute('src'), baseDir, store)
+    if (url) el.setAttribute('src', url)
+  }
+  for (const el of doc.querySelectorAll('video[poster]')) {
+    const url = await toBlobUrl(el.getAttribute('poster'), baseDir, store)
+    if (url) el.setAttribute('poster', url)
+  }
   return '<!doctype html>' + doc.documentElement.outerHTML
 }
 
@@ -819,8 +829,29 @@ function hideLoading() {
   $loading.hidden = true
 }
 
+// 破棄前に現在のスクロール位置を確定させ、以後の scroll イベントで上書きされないよう購読も外す。
+// （画像の遅延読み込み解放でレイアウトが縮み scrollTop がクランプされることがあり、それより
+// 前に確定させないと再読み込みのたびに保存位置が 0 付近に化けてしまう）
+// forPath: navigateTabTo のように tab.path を書き換える前に、旧パス側へ保存したい場合に指定する。
+// tab.onScroll が既に null（＝このドキュメントについて確定済み）なら何もしない。
+function snapshotScrollPosition(tab, forPath) {
+  if (!tab.onScroll) return
+  try {
+    const doc = tab.iframe.contentDocument
+    if (!doc) return
+    doc.removeEventListener('scroll', tab.onScroll, true)
+    if (tab.iframe.contentWindow) tab.iframe.contentWindow.removeEventListener('scroll', tab.onScroll)
+    tab.onScroll = null
+    const sc = doc.scrollingElement || doc.documentElement
+    // 破棄前のレイアウト（画像が読み込まれた状態）でアンカーを取る。再構築後の縮んだ
+    // レイアウトでは正しい位置が求められないため、このタイミングでの取得が重要。
+    if (sc) scrollPositions.set(scrollPosKey(tab, forPath), captureScrollState(doc, sc))
+  } catch {}
+}
+
 async function renderTab(tab, autoScroll) {
   if (tab.path === activePath) showLoading()
+  snapshotScrollPosition(tab)
   try {
     const file = await tab.handle.getFile()
     tab.lastModified = file.lastModified
@@ -939,7 +970,9 @@ function onIframeLoad(tab) {
   doc.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     const rect = tab.iframe.getBoundingClientRect()
-    showContentMenu(rect.left + e.clientX, rect.top + e.clientY, tab)
+    const img = e.target && e.target.closest ? e.target.closest('img') : null
+    const video = e.target && e.target.closest ? e.target.closest('video') : null
+    showContentMenu(rect.left + e.clientX, rect.top + e.clientY, tab, img, video)
   })
   doc.addEventListener('click', hideCtx) // iframe 内クリックでメニューを閉じる
   // 見出し抽出（レンダリング: h1-h6 / ソース: data-mdp-level 付きアンカー）
@@ -954,69 +987,100 @@ function onIframeLoad(tab) {
   // スクロール追従ハイライト（iframe 文書のスクロールを購読）+ 位置の記憶
   const sc = doc.scrollingElement || doc.documentElement
   const onScroll = () => {
-    scrollPositions.set(scrollPosKey(tab), sc.scrollTop)
+    // スクロール中はピクセル値のみ（毎回アンカーを探すと重いため）。
+    // 再レンダリング直前には snapshotScrollPosition がアンカー付きで上書きする。
+    scrollPositions.set(scrollPosKey(tab), { top: sc.scrollTop, line: null, offset: 0 })
     if (tab.path === activePath) updateActiveHeading(tab)
   }
+  tab.onScroll = onScroll // renderTab 側で破棄前に外せるよう参照を保持
   doc.addEventListener('scroll', onScroll, { passive: true, capture: true })
   if (tab.iframe.contentWindow) tab.iframe.contentWindow.addEventListener('scroll', onScroll, { passive: true })
   if (tab.path === activePath) {
     renderOutline(tab)
     updateActiveHeading(tab)
   }
-  // 自動リロード時: 変更行に対応する要素へスクロール
+  // タブの再作成・再読み込み・自動リロードのいずれでも、直前のスクロール位置を維持する
+  restoreScrollPosition(tab)
+  // 自動リロード時は変更箇所をハイライトのみで知らせる（表示位置は動かさない）
   if (tab.scrollToLine != null) {
-    scrollToLine(doc, tab.scrollToLine, tab.scrollHighlight !== false)
+    if (tab.scrollHighlight !== false) highlightChangedLine(doc, tab.scrollToLine)
     tab.scrollToLine = null
-  } else {
-    // タブの再作成・再読み込みでも、そのファイル（表示モード）の直前のスクロール位置を復元
-    restoreScrollPosition(tab)
   }
 }
 
-// 保存済みのスクロール位置をタブへ復元（レイアウト確定を待って反映）
+// スクロール位置は「ピクセル値」だけでなく「アンカー（画面最上部にある data-line 要素と
+// その画面内オフセット）」も併せて保持する。再レンダリング直後は遅延画像が未読込で文書高さが
+// 大きく縮むため、ピクセル値だけだと短い文書にクランプされて先頭へ戻ってしまう。
+function captureScrollState(doc, sc) {
+  const st = { top: sc.scrollTop, line: null, offset: 0 }
+  for (const el of doc.querySelectorAll('[data-line]')) {
+    const r = el.getBoundingClientRect()
+    if (r.bottom > 0) {
+      // 画面上端に最も近い（＝最初に下端が上端を超える）要素をアンカーにする
+      st.line = el.getAttribute('data-line')
+      st.offset = r.top
+      break
+    }
+  }
+  return st
+}
+
+// 保持した状態をドキュメントへ適用。アンカーが見つかればそれを基準に、無ければピクセル値で復元
+function applyScrollState(doc, sc, st) {
+  if (st.line != null) {
+    const el = doc.querySelector(`[data-line="${st.line}"]`)
+    if (el) {
+      sc.scrollTop = sc.scrollTop + el.getBoundingClientRect().top - st.offset
+      return
+    }
+  }
+  sc.scrollTop = st.top
+}
+
+// 保存済みのスクロール位置をタブへ復元（レイアウト確定・遅延画像の読み込みを待って追従）
 function restoreScrollPosition(tab) {
   if (!tab || isPdfPath(tab.path)) return
   const doc = tab.iframe.contentDocument
   if (!doc) return
-  const saved = scrollPositions.get(scrollPosKey(tab))
-  if (saved == null) return
+  const st = scrollPositions.get(scrollPosKey(tab))
+  if (!st) return
   const sc = doc.scrollingElement || doc.documentElement
-  const win = doc.defaultView
-  const restore = () => {
-    sc.scrollTop = saved
+  if (!sc) return
+  // ユーザーが自分でスクロール操作を始めたら、以降の再適用は行わない
+  let cancelled = false
+  const stop = () => (cancelled = true)
+  doc.addEventListener('wheel', stop, { once: true, passive: true })
+  doc.addEventListener('touchstart', stop, { once: true, passive: true })
+  doc.addEventListener('keydown', stop, { once: true })
+  const apply = () => {
+    if (!cancelled) applyScrollState(doc, sc, st)
   }
-  if (win && win.requestAnimationFrame) win.requestAnimationFrame(() => win.requestAnimationFrame(restore))
-  else restore()
+  apply() // 即時反映（多くの場合はこれで十分）
+  // display:none 解除直後は iframe 内部の rAF が止まっていることがあるため、
+  // 外側（アプリ本体）の rAF でレイアウト確定後にも再適用しておく
+  requestAnimationFrame(() => requestAnimationFrame(apply))
+  // 遅延画像が読み込まれると文書高さが伸びるため、短時間だけ位置を追い直す
+  let n = 0
+  const timer = setInterval(() => {
+    apply()
+    if (cancelled || ++n >= 12) clearInterval(timer)
+  }, 80)
 }
 
-// data-line を持つ要素のうち、指定行に最も近い箇所へスクロール
-function scrollToLine(doc, line, highlight) {
-  const win = doc.defaultView
-  const sc = doc.scrollingElement || doc.documentElement
-  const doScroll = (smooth) => {
-    const els = [...doc.querySelectorAll('[data-line]')]
-    if (!els.length) return
-    let target = null
-    for (const el of els) {
-      const ln = Number(el.getAttribute('data-line'))
-      if (ln <= line) target = el
-      else {
-        if (!target) target = el
-        break
-      }
+// data-line を持つ要素のうち、指定行に最も近い箇所をハイライトする（スクロールはしない）
+function highlightChangedLine(doc, line) {
+  const els = [...doc.querySelectorAll('[data-line]')]
+  if (!els.length) return
+  let target = null
+  for (const el of els) {
+    const ln = Number(el.getAttribute('data-line'))
+    if (ln <= line) target = el
+    else {
+      if (!target) target = el
+      break
     }
-    if (!target) return
-    // 対象行を画面の少し下（上から約20%）に表示。先頭付近は最上部へ
-    const margin = Math.round((win ? win.innerHeight : 600) * 0.2)
-    const top = target === els[0] ? 0 : Math.max(0, target.getBoundingClientRect().top + sc.scrollTop - margin)
-    sc.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' })
-    if (smooth && highlight) highlightEl(target) // ハイライトは初回のみ・削除時は無し
   }
-  // レイアウト確定後にスムーズスクロール
-  if (win && win.requestAnimationFrame) win.requestAnimationFrame(() => win.requestAnimationFrame(() => doScroll(true)))
-  else doScroll(true)
-  // 画像読み込み等で位置がずれた場合に再補正（瞬時）
-  if (win) win.addEventListener('load', () => doScroll(false), { once: true })
+  if (target) highlightEl(target)
 }
 
 // 変更箇所を一時的に黄色背景でハイライト
@@ -1359,9 +1423,16 @@ function pathMenu(e, path) {
   showCtx(e.clientX, e.clientY, copyPathItems(path))
 }
 
-// メインコンテンツ（プレビュー）右クリックメニュー
-function showContentMenu(x, y, tab) {
+// メインコンテンツ（プレビュー）右クリックメニュー。img/video 上での右クリックなら該当要素を渡す
+function showContentMenu(x, y, tab, imgEl, videoEl) {
   const items = []
+  if (imgEl) {
+    items.push({ label: '画像をコピー', action: () => copyImageToClipboard(imgEl) })
+  }
+  if (videoEl) {
+    // 動画そのものは Clipboard API が対応する MIME 型に無いため、現在のフレームを画像としてコピーする
+    items.push({ label: '現在のフレームを画像コピー', action: () => copyVideoFrameToClipboard(videoEl) })
+  }
   if (!isPdfPath(tab.path)) {
     items.push({
       label: tab.source ? 'レンダリング表示に切替' : 'ソース表示に切替',
@@ -1378,6 +1449,63 @@ function showContentMenu(x, y, tab) {
   items.push({ label: '印刷 / PDF 出力', action: printActiveTab })
   items.push(...copyPathItems(tab.path))
   showCtx(x, y, items)
+}
+
+// 画像要素をクリップボードへコピー（クリップボードは PNG しか広く保証されないため canvas 経由で PNG 化）
+async function copyImageToClipboard(imgEl) {
+  if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+    toast('このブラウザは画像コピーに未対応です')
+    return
+  }
+  try {
+    // ローカル画像（data-mdp-src）は遅延読み込み前でも元ファイルから直接取得できる
+    const p = imgEl.getAttribute('data-mdp-src')
+    const h = p && fileMap.get(p)
+    let source, w, hgt
+    if (h) {
+      source = await createImageBitmap(await h.getFile())
+      w = source.width
+      hgt = source.height
+    } else {
+      if (!imgEl.complete || !imgEl.naturalWidth) throw new Error('not loaded')
+      source = imgEl
+      w = imgEl.naturalWidth
+      hgt = imgEl.naturalHeight
+    }
+    await drawToClipboardPng(source, w, hgt)
+    toast('画像をコピーしました')
+  } catch {
+    toast('画像のコピーに失敗しました')
+  }
+}
+
+// 動画は Clipboard API が対応する MIME 型（画像のみ）に無いため、現在のフレームを画像としてコピーする
+async function copyVideoFrameToClipboard(videoEl) {
+  if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+    toast('このブラウザは画像コピーに未対応です')
+    return
+  }
+  try {
+    const w = videoEl.videoWidth
+    const hgt = videoEl.videoHeight
+    if (!w || !hgt) throw new Error('no frame')
+    await drawToClipboardPng(videoEl, w, hgt)
+    toast('現在のフレームをコピーしました')
+  } catch {
+    toast('フレームのコピーに失敗しました')
+  }
+}
+
+// 画像ソース（img/video/ImageBitmap）を canvas に描画し PNG としてクリップボードへ書き込む
+async function drawToClipboardPng(source, w, hgt) {
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = hgt
+  canvas.getContext('2d').drawImage(source, 0, 0, w, hgt)
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png')
+  )
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
 }
 
 // アクティブタブのコンテンツのみ印刷（ブラウザのダイアログで PDF 保存可）
@@ -1587,6 +1715,7 @@ function navigateTabTo(tab, node, pushHistory) {
     return false
   }
   const oldPath = tab.path
+  snapshotScrollPosition(tab, oldPath) // path を書き換える前に、旧パス側のスクロール位置を確定させる
   if (pushHistory) {
     const hist = (tab.history || [oldPath]).slice(0, (tab.historyIndex || 0) + 1)
     hist.push(node.path)
@@ -1640,6 +1769,7 @@ function setChecked(path, checked) {
 function closeTab(path) {
   const t = tabs.get(path)
   if (!t) return
+  snapshotScrollPosition(t) // 再度同じファイルを開いたときのために、閉じる直前の位置を確定させておく
   disposeLazyImages(t)
   for (const u of t.blobUrls) URL.revokeObjectURL(u)
   t.iframe.remove()
