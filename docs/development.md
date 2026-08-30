@@ -117,9 +117,20 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 - Windows exe には Windows ランナーが必要（SEA は実行中の `node` を同梱するため）。mac / Linux 版も配る場合は `runs-on` を `macos-latest` / `ubuntu-latest` にしたジョブを matrix で追加する（`build-exe.mjs` は OS を判定して対応済み）。
 - 生成 exe は未署名のため、ダウンロード時に SmartScreen 警告が出る場合がある（コード署名証明書があれば署名ステップを追加可能）。
 
+## バージョン表示
+
+画面にビルドのバージョンを出す。**古い exe を実行していることに気付けるようにするため**（配布先の exe とリポジトリの版がズレやすい）。
+
+- 定義元は `package.json` の `version` のみ。esbuild の `define` で `__APP_VERSION__` としてバンドルに埋め込む（`src/server.js` の `buildOptions` と `scripts/build-exe.mjs` の両方）。
+- クライアントは `APP_VERSION` として参照し、以下の 3 箇所に表示する。
+  - ヘッダー右端の **☰ メニュー末尾**（クリック不可の情報行 `.mi-static`）
+  - **設定ダイアログ**の冒頭（`version x.y.z / 現在のポート: N`）
+  - ☰ ボタンの **tooltip**
+- `define` されない経路でバンドルした場合は `'dev'` にフォールバックする。
+
 ## ビルドの仕組み
 
-- `src/server.js` の `startServer()` が起動時に esbuild で `src/client/main.js` を `public/bundle.js` にバンドル（`format: esm`, `platform: browser`, `minify`）。
+- `src/server.js` の `startServer()` が起動時に esbuild で `src/client/main.js` を `public/bundle.js` にバンドル（`format: esm`, `platform: browser`, `minify`, `define` でバージョン埋め込み）。
 - `--watch` 時は `esbuild.context().watch()` で監視し、`src/client` を編集すると自動リビルド。ブラウザはハードリロード（Ctrl+Shift+R）で反映。
 - `public/bundle.js` は生成物なので Git 管理しない（`.gitignore`）。
 

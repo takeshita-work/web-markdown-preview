@@ -185,6 +185,12 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .ctxmenu .mi:hover { background: #e3f0ff; }
 .ctxmenu .mi-icon { flex: 0 0 auto; display: inline-flex; align-items: center; color: #555; }
 .ctxmenu .mi-icon svg { display: block; }
+/* バージョン等の情報行: クリック不可・区切り線付きでメニュー末尾に置く */
+.ctxmenu .mi-static {
+  cursor: default; color: #999; font-size: 11px;
+  padding: 5px 14px; margin-top: 4px; border-top: 1px solid #e5e5e5;
+}
+.ctxmenu .mi-static:hover { background: transparent; }
 
 /* トースト */
 .toast {

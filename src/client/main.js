@@ -24,6 +24,10 @@ md.core.ruler.push('mdp_line_numbers', (state) => {
 const turndown = new TurndownService({ codeBlockStyle: 'fenced', headingStyle: 'atx', bulletListMarker: '-' })
 turndown.use(gfm) // テーブル / 打ち消し線 / タスクリストに対応
 
+// ビルド時に esbuild の define で package.json の version が埋め込まれる。
+// define されていない環境（直接読み込み等）でも壊れないようフォールバックする。
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
+
 const LS = {
   leftWidth: 'mdpreview.leftWidth',
   rightWidth: 'mdpreview.rightWidth',
@@ -1243,7 +1247,7 @@ async function openSettings() {
 
   const info = document.createElement('div')
   info.className = 'modal-note'
-  info.textContent = `現在のポート: ${cfg.running}`
+  info.textContent = `version ${APP_VERSION} / 現在のポート: ${cfg.running}`
 
   const row = document.createElement('label')
   row.className = 'modal-row'
@@ -1342,6 +1346,7 @@ function openMenu(anchor) {
   showCtx(rect.left, rect.bottom + 4, [
     { label: '設定', icon: ICONS.gear, action: openSettings },
     { label: 'アプリを終了', icon: ICONS.power, action: () => confirmDialog('アプリを終了しますか？', '終了', quitApp) },
+    { label: `version ${APP_VERSION}`, static: true },
   ])
   // メニューの右端をボタンの右端に合わせる
   ctxEl.style.left = Math.max(4, rect.right - ctxEl.offsetWidth) + 'px'
@@ -1386,10 +1391,15 @@ function showCtx(x, y, items) {
     } else {
       mi.textContent = it.label
     }
-    mi.addEventListener('click', () => {
-      hideCtx()
-      it.action()
-    })
+    if (it.static) {
+      // バージョン表示など、クリックしない情報行
+      mi.className = 'mi mi-static'
+    } else {
+      mi.addEventListener('click', () => {
+        hideCtx()
+        it.action()
+      })
+    }
     ctxEl.appendChild(mi)
   }
   ctxEl.style.display = 'block'
@@ -2192,6 +2202,7 @@ $btnReload.innerHTML = ICONS.reload
 $btnBack.innerHTML = ICONS.back
 $btnForward.innerHTML = ICONS.forward
 $btnMenu.innerHTML = ICONS.menu
+$btnMenu.title = `メニュー（version ${APP_VERSION}）`
 $btnMenu.addEventListener('click', (e) => {
   e.stopPropagation() // document の click→hideCtx で即閉じしないように
   if (ctxEl.style.display === 'block') hideCtx() // 開いていればトグルで閉じる

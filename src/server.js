@@ -10,6 +10,16 @@ const PUBLIC_DIR = path.resolve(__dirname, '..', 'public')
 const CLIENT_ENTRY = path.resolve(__dirname, 'client', 'main.js')
 const BUNDLE_OUT = path.join(PUBLIC_DIR, 'bundle.js')
 const CONFIG_FILE = path.resolve(__dirname, '..', 'config.json')
+const PKG_FILE = path.resolve(__dirname, '..', 'package.json')
+
+// クライアントに埋め込むバージョン。package.json を単一の定義元とする
+function readVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(PKG_FILE, 'utf8')).version || 'dev'
+  } catch {
+    return 'dev'
+  }
+}
 
 const validPort = (n) => Number.isInteger(n) && n >= 1 && n <= 65535
 function readConfig() {
@@ -41,6 +51,7 @@ export async function startServer({ port = null, watch = false } = {}) {
     minify: true,
     sourcemap: false,
     logLevel: 'info',
+    define: { __APP_VERSION__: JSON.stringify(readVersion()) },
   }
 
   if (watch) {
