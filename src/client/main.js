@@ -721,7 +721,8 @@ async function buildDocument(tab, src) {
       })
       .join('\n')
     return `<!doctype html><html><head><meta charset="utf-8">
-<style>body{margin:0;} pre{margin:0;padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}</style>
+<style>body{margin:0;} pre{margin:0;padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
+@media print{ html{height:auto !important;} body{transform:none !important; width:auto !important; min-height:0 !important;} }</style>
 </head><body><pre>${body}</pre></body></html>`
   }
 
@@ -798,6 +799,9 @@ async function buildDocument(tab, src) {
   @media print {
     /* 上下はページ余白（ダイアログ Default 時に有効）、左右はコンテンツ padding で常に確保 */
     @page { margin: 14mm 0; }
+    /* 画面のズーム（transform / 固定幅）は印刷に持ち込まない */
+    html { height: auto !important; }
+    body { transform: none !important; width: auto !important; min-height: 0 !important; }
     /* 選択 CSS の背景色（h1 帯・コード背景など）を印刷でも出す */
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     html,body{ background:#fff !important; padding:0 !important; min-height:0 !important; }
@@ -958,7 +962,8 @@ function onIframeLoad(tab) {
     (e) => {
       if (!e.ctrlKey) return
       e.preventDefault()
-      stepZoom(e.deltaY < 0 ? 1 : -1) // 切りのいい段階で拡大縮小
+      // 切りのいい段階で拡大縮小。カーソル位置の内容が動かないようにする
+      stepZoom(e.deltaY < 0 ? 1 : -1, { x: e.clientX, y: e.clientY })
     },
     { passive: false }
   )
@@ -1608,17 +1613,68 @@ const nearestZoomIndex = (z) => {
 const zoomKey = (t) => (t.source ? 'source' : 'rendered')
 const getZoom = (t) => (t ? t.zoom[zoomKey(t)] : 1)
 
+// ズーム前後で表示位置が飛ばないよう、アンカー点（カーソル位置 / 表示領域の中央）にある
+// 内容の位置を記録する。標準表示の transform / marp の SVG 寸法のどちらでスケールしても
+// 効くよう、その点にある要素の実測値（位置・大きさ・要素内での相対位置）を基準にする。
+function captureZoomAnchor(doc, sc, ax, ay) {
+  const a = { ax, ay, top: sc.scrollTop, left: sc.scrollLeft, height: sc.scrollHeight, width: sc.scrollWidth }
+  // 点が段落間の余白（＝body に当たる）に落ちることがあるので近傍も少しずつ探す。
+  for (const dy of [0, -8, 8, -20, 20, -40, 40, -80, 80]) {
+    const y = ay + dy
+    if (y < 0 || y > sc.clientHeight) continue
+    const el = doc.elementFromPoint(ax, y)
+    // html / body 自体はスケールしない（marp は配下の svg だけが拡大縮小するため）
+    if (!el || el === doc.documentElement || el === doc.body) continue
+    const r = el.getBoundingClientRect()
+    if (r.height > 0) {
+      a.el = el
+      a.ey = y
+      a.fy = (y - r.top) / r.height // 要素内での相対位置（縦）
+      if (r.width > 0) a.fx = (ax - r.left) / r.width // 同（横）
+      break
+    }
+  }
+  return a
+}
+
+// 記録したアンカーが同じ位置に見えるようスクロール位置を補正する
+function restoreZoomAnchor(sc, a) {
+  if (a.el && a.el.isConnected) {
+    const r = a.el.getBoundingClientRect()
+    sc.scrollTop += r.top + a.fy * r.height - a.ey
+    if (a.fx != null) {
+      sc.scrollLeft += r.left + a.fx * r.width - a.ax
+      return
+    }
+  } else {
+    // 要素が取れなかった場合は文書全体に対する相対位置を保つ
+    const ry = a.height > 0 ? sc.scrollHeight / a.height : 1
+    sc.scrollTop = (a.top + a.ay) * ry - a.ay
+  }
+  const rx = a.width > 0 ? sc.scrollWidth / a.width : 1
+  sc.scrollLeft = (a.left + a.ax) * rx - a.ax
+}
+
 // タブの現在モードのズームを iframe に適用
-function applyZoomToTab(t) {
+// anchor: { x, y }（iframe 内クライアント座標。省略値は表示領域の中央）を渡すと、その点の
+// 内容が動かないようスクロール位置を補正する。anchor 自体を省略すると補正しない（初回ロード等）。
+function applyZoomToTab(t, anchor) {
   if (!t || isPdfPath(t.path)) return
   const doc = t.iframe.contentDocument
   if (!doc || !doc.body) return
+  const sc = doc.scrollingElement || doc.documentElement
+  const win = t.iframe.contentWindow
+  let keep = null
+  if (anchor && sc && win) {
+    const ax = anchor.x != null ? anchor.x : (win.innerWidth || sc.clientWidth) / 2
+    const ay = anchor.y != null ? anchor.y : (win.innerHeight || sc.clientHeight) / 2
+    keep = captureZoomAnchor(doc, sc, ax, ay)
+  }
   const z = getZoom(t)
   const marpit = doc.querySelector('div.marpit')
   if (marpit) {
     // marp は SVG スライド。Chromium は zoom を SVG/foreignObject に効かせられないため
     // 各スライドの SVG 表示サイズ（viewBox × 倍率）を直接指定してスケールする
-    doc.body.style.zoom = ''
     for (const svg of marpit.querySelectorAll(':scope > svg')) {
       const vb = svg.viewBox && svg.viewBox.baseVal
       const w = (vb && vb.width) || parseFloat(svg.getAttribute('width')) || 1280
@@ -1627,8 +1683,35 @@ function applyZoomToTab(t) {
       svg.style.height = h * z + 'px'
     }
   } else {
-    doc.body.style.zoom = z
+    applyScaleToBody(doc, z)
   }
+  if (keep) restoreZoomAnchor(sc, keep)
+}
+
+// 標準 / ソース表示のスケール。`zoom` ではなく transform を使い、レイアウト幅を 100% 時の
+// 幅に固定する。`zoom` だと倍率ごとに折り返しが変わってしまい、拡大した箇所がその場で
+// 大きくならない（＝マウス位置を中心に拡大できない）ため。
+// transform は文書のレイアウト高さを変えないので、スクロール量は html の高さで合わせる。
+function applyScaleToBody(doc, z) {
+  const de = doc.documentElement
+  const b = doc.body.style
+  if (z === 1) {
+    b.transform = ''
+    b.transformOrigin = ''
+    b.width = ''
+    b.minHeight = ''
+    de.style.height = ''
+    return
+  }
+  const baseW = de.clientWidth // 100% 相当のレイアウト幅（＝プレビュー枠の幅）
+  b.width = baseW + 'px'
+  b.minHeight = 100 / z + 'vh' // 拡大後にちょうど画面を満たす高さ
+  b.transformOrigin = '0 0'
+  // 縮小時は横に余白ができるので中央へ寄せる（拡大時は 0 で左上基点）
+  const dx = Math.max(0, (baseW * (1 - z)) / 2)
+  b.transform = `translateX(${dx}px) scale(${z})`
+  // offsetHeight は transform の影響を受けないレイアウト高さ
+  de.style.height = doc.body.offsetHeight * z + 'px'
 }
 
 // ズーム UI（セレクト/ボタン）をアクティブタブの現在モードに同期
@@ -1641,21 +1724,21 @@ function updateZoomUI() {
   $zoomOut.disabled = disabled
 }
 
-// アクティブタブの現在モードのズームを設定
-function setActiveZoom(z) {
+// アクティブタブの現在モードのズームを設定（anchor は applyZoomToTab と同じ）
+function setActiveZoom(z, anchor) {
   const t = tabs.get(activePath)
   if (!t || isPdfPath(t.path)) return
   t.zoom[zoomKey(t)] = ZOOM_LEVELS[nearestZoomIndex(z)]
-  applyZoomToTab(t)
+  applyZoomToTab(t, anchor || {}) // UI 操作時は表示領域の中央を基準に位置を保つ
   updateZoomUI()
 }
 
 // dir: +1 拡大 / -1 縮小（段階を1つ移動）
-function stepZoom(dir) {
+function stepZoom(dir, anchor) {
   const t = tabs.get(activePath)
   if (!t || isPdfPath(t.path)) return
   const i = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, nearestZoomIndex(getZoom(t)) + dir))
-  setActiveZoom(ZOOM_LEVELS[i])
+  setActiveZoom(ZOOM_LEVELS[i], anchor)
 }
 
 function handleZoomKey(e) {
@@ -1674,6 +1757,18 @@ function handleZoomKey(e) {
 
 // ---- タブ / プレビュー -------------------------------------------------------
 
+// transform 方式はレイアウト幅を 100% 時の幅に固定するため、プレビュー枠の幅が
+// 変わったら（ウィンドウ / サイドバーのリサイズ）測り直して折り返しを追従させる
+const paneObserver = new ResizeObserver((entries) => {
+  for (const e of entries) {
+    if (!e.contentRect.width) continue // タブ非表示中（display:none）は無視
+    for (const t of tabs.values()) {
+      if (t.iframe !== e.target || isPdfPath(t.path) || getZoom(t) === 1) continue
+      applyZoomToTab(t, {}) // 画面中央を基準に位置を保ったまま再適用
+    }
+  }
+})
+
 function openTab(node, preview) {
   const iframe = document.createElement('iframe')
   iframe.className = 'hidden'
@@ -1683,6 +1778,7 @@ function openTab(node, preview) {
     history: [node.path], historyIndex: 0, // タブ内リンク遷移の履歴（[←][→] 用）
   }
   iframe.addEventListener('load', () => onIframeLoad(tab))
+  paneObserver.observe(iframe)
   $preview.appendChild(iframe)
   tabs.set(node.path, tab)
   renderTabs()
@@ -1782,6 +1878,7 @@ function closeTab(path) {
   snapshotScrollPosition(t) // 再度同じファイルを開いたときのために、閉じる直前の位置を確定させておく
   disposeLazyImages(t)
   for (const u of t.blobUrls) URL.revokeObjectURL(u)
+  paneObserver.unobserve(t.iframe)
   t.iframe.remove()
   tabs.delete(path)
   if (previewPath === path) previewPath = null

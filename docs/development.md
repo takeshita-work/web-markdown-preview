@@ -150,7 +150,10 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 - **タブ** … `{ iframe, path, handle, view, defaultView, source, zoom:{rendered,source}, preview, prevSrc, ... }`。
 - **レンダリング** … `renderTab()` → `buildDocument()`。.md は markdown-it / marp-core、.pdf は blob URL。`onIframeLoad()` でズーム適用・見出し抽出・スクロール同期・リンク/右クリック購読。
 - **行番号同期** … markdown-it の core ルール `mdp_line_numbers` で `data-line` を付与（`env.mdpLineOffset` で frontmatter 補正）。
-- **ズーム** … `ZOOM_LEVELS` 段階、`applyZoomToTab()`（標準=body zoom / marp=SVG 寸法）。
+- **ズーム** … `ZOOM_LEVELS` 段階、`applyZoomToTab(tab, anchor)`（標準 / ソース=`applyScaleToBody()` の `transform: scale()` / marp=SVG 寸法）。`anchor`（iframe 内クライアント座標。既定は表示領域の中央）を渡すと `captureZoomAnchor()` / `restoreZoomAnchor()` でその点の内容が動かないようスクロール位置を補正する。初回ロード時は `anchor` を渡さない。
+  - `zoom` ではなく `transform` を使うのは、`zoom` では倍率ごとに折り返しが変わり「カーソル位置を中心に拡大」ができないため。レイアウト幅を `documentElement.clientWidth`（100% 時の幅）に固定し、縮小時は `translateX` で中央寄せする。
+  - `transform` はレイアウト高さを変えないため、スクロール量は `documentElement.style.height = 実寸 × 倍率` で合わせる（これが無いと縮小時に文書末尾に空白が残る）。
+  - プレビュー枠のリサイズは `paneObserver`（ResizeObserver）で検知し、レイアウト幅を測り直す。印刷時は生成ドキュメント側の `@media print` で `transform` / 固定幅を打ち消す。
 - **ドラッグ** … `makeDrag()` が Pointer Events + `setPointerCapture` で開閉（クリック）とリサイズ（ドラッグ）を判別。
 
 ## 動作要件
