@@ -8,6 +8,8 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 }
 #footer label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
 #footer select { font-size: 12px; padding: 2px 4px; }
+/* 長いパスでフッターが押し広げられないように上限を設ける（表示は省略形＋tooltip） */
+#view { max-width: 260px; }
 /* プレビュー中ファイルの情報（フッター・1行・左詰め・項目間は余白で区切る） */
 .file-info {
   flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 16px;
@@ -97,6 +99,40 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .modal-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: #333; }
 .modal-note { font-size: 12px; color: #777; line-height: 1.6; }
 .tree-hint { padding: 12px; font-size: 12px; color: #999; line-height: 1.6; }
+
+/* CSS の検索フォルダ選択（階層をたどる） */
+.dirpick-bar { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
+.dirpick-path {
+  flex: 1; min-width: 0; font-size: 12px; color: #333;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;
+}
+.dirpick-count { font-size: 12px; color: #777; white-space: nowrap; }
+.dirpick { max-height: 260px; overflow: auto; border: 1px solid #ddd; border-radius: 4px; }
+.dirpick .row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 0;
+  font-size: 12px; color: #333; cursor: pointer;
+}
+.dirpick .row:hover { background: #eef4fb; }
+.dirpick .row.current { background: #d7ebff; }
+.dirpick .row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dirpick .row .n { margin-left: auto; color: #777; }
+.dirpick .row .nm { cursor: pointer; }
+.dirpick .row .caret { width: 12px; flex: 0 0 12px; color: #888; font-size: 10px; cursor: pointer; user-select: none; }
+.dirpick .row .caret.none { cursor: default; }
+.dirpick .row input[type="checkbox"] { margin: 0; cursor: pointer; }
+.dirpick-empty { padding: 10px; font-size: 12px; color: #999; }
+.dirpick-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.dirpick-none { font-size: 12px; color: #999; }
+.dirpick-chips .chip {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 220px;
+  background: #d7ebff; border: 1px solid #9cc6ee; border-radius: 10px;
+  padding: 1px 4px 1px 8px; font-size: 12px; color: #24486b;
+}
+.dirpick-chips .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dirpick-chips .chip button {
+  border: 0; background: none; color: #24486b; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px;
+}
+.dirpick-chips .chip button:hover { color: #c00; }
 
 /* ---- 左: ツリー ---- */
 #tree-pane { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }

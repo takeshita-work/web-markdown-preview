@@ -64,7 +64,7 @@ const LS = {
 
 let rootHandle = null
 const fileMap = new Map() // posixPath -> FileSystemFileHandle
-let cssDir = '' // CSS を探す起点（ルートからの相対パス。'' ならルート以下すべて）
+let cssDirs = [] // CSS を探すフォルダ（ルートからの相対パス。空ならルート以下すべて）
 let themeList = [] // [{ path, theme, css }]
 let styleList = [] // [{ path, css }]
 let defaultStdCss = '' // 既定 CSS のテキスト
@@ -370,48 +370,80 @@ function readFolderSettings() {
 
 function loadFolderSettings() {
   const s = (rootHandle && readFolderSettings()[rootHandle.name]) || {}
-  cssDir = typeof s.cssDir === 'string' ? s.cssDir : ''
+  // cssDir（単一・旧形式）で保存されたものは cssDirs（複数）へ移行する
+  cssDirs = Array.isArray(s.cssDirs) ? s.cssDirs.filter((d) => typeof d === 'string' && d) : s.cssDir ? [s.cssDir] : []
   updateCssDirUI()
 }
 
 // フッターのボタンを現在の指定に同期（限定中は on 表示、tooltip に指定先）
 function updateCssDirUI() {
   $btnCssDir.disabled = !rootHandle
-  $btnCssDir.classList.toggle('on', !!cssDir)
-  $btnCssDir.title = `CSS の検索フォルダ: ${cssDir || 'ルート以下すべて'}`
+  $btnCssDir.classList.toggle('on', cssDirs.length > 0)
+  $btnCssDir.title = `CSS の検索フォルダ: ${cssDirs.length ? cssDirs.join(' / ') : 'ルート以下すべて'}`
 }
 
 function saveFolderSettings(patch) {
   if (!rootHandle) return
   const all = readFolderSettings()
-  all[rootHandle.name] = { ...(all[rootHandle.name] || {}), ...patch }
+  const merged = { ...(all[rootHandle.name] || {}), ...patch }
+  for (const k of Object.keys(merged)) if (merged[k] === undefined) delete merged[k]
+  all[rootHandle.name] = merged
   localStorage.setItem(LS.folderSettings, JSON.stringify(all))
 }
 
-// cssDir 配下かどうか（'' なら制限なし）
-const inCssDir = (p) => !cssDir || p.startsWith(cssDir + '/')
+// 選択したフォルダのいずれかの配下か（未選択なら制限なし）
+const inCssDir = (p) => !cssDirs.length || cssDirs.some((d) => p.startsWith(d + '/'))
 
-// 「CSS の検索フォルダ」候補: css を含むディレクトリとその親（配下の css 数つき）
-function cssDirCandidates() {
-  const counts = new Map()
+// path が selected のいずれかの配下（自身を除く上位）に含まれるか
+const coveredByCssDir = (path, selected) => selected.some((d) => d !== path && path.startsWith(d + '/'))
+
+// 選択に path を足す。上位が既にあるなら足さず、配下の選択は冗長なので取り除く
+function addCssDir(selected, path) {
+  if (coveredByCssDir(path, selected)) return selected
+  return [...selected.filter((d) => d !== path && !d.startsWith(path + '/')), path].sort((a, b) => a.localeCompare(b, 'ja'))
+}
+
+// css を含むディレクトリだけのツリーを組む（配下の総数 count / 直下の数 direct つき）。
+// パスが深いと一覧が読めなくなるため、ダイアログでは 1 階層ずつたどらせる。
+function cssDirTree() {
+  const root = { name: '', path: '', direct: 0, count: 0, children: new Map() }
   for (const p of fileMap.keys()) {
     if (!p.toLowerCase().endsWith('.css')) continue
     const segs = p.split('/')
     segs.pop() // ファイル名を除く
+    let node = root
+    root.count++
     let cur = ''
     for (const seg of segs) {
       cur = cur ? cur + '/' + seg : seg
-      counts.set(cur, (counts.get(cur) || 0) + 1)
+      let child = node.children.get(seg)
+      if (!child) node.children.set(seg, (child = { name: seg, path: cur, direct: 0, count: 0, children: new Map() }))
+      child.count++
+      node = child
     }
+    node.direct++ // このディレクトリ直下の css
   }
-  if (cssDir && !counts.has(cssDir)) counts.set(cssDir, 0) // 現在の指定は候補に無くても残す
-  return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ja'))
+  return root
+}
+
+// 中身が 1 つしかない階層は飛ばして、次に意味のある（css を持つ / 枝分かれする）ノードまで降りる。
+// 例: external_x/a/b/c/css に 1 つだけ css があるなら 1 行で「external_x/…/css」まで進む
+function compressCssDirNode(child) {
+  let node = child
+  const segs = [child.name]
+  while (!node.direct && node.children.size === 1) {
+    node = [...node.children.values()][0]
+    segs.push(node.name)
+  }
+  // 長いパスは中間を省略して表示（完全なパスは title に出す）
+  const label = segs.length > 2 ? `${segs[0]}/…/${segs[segs.length - 1]}` : segs.join('/')
+  return { node, label }
 }
 
 // CSS の検索フォルダを変更して即座に反映する
-async function setCssDir(dir) {
-  cssDir = dir
-  saveFolderSettings({ cssDir: dir })
+async function setCssDirs(dirs) {
+  cssDirs = dirs
+  saveFolderSettings({ cssDirs: dirs, cssDir: undefined }) // 旧形式のキーは残さない
   updateCssDirUI()
   await classifyCss()
   // 候補から外れた CSS を選んでいたタブは既定へ戻す
@@ -420,7 +452,21 @@ async function setCssDir(dir) {
     renderTab(t)
   }
   syncPreview()
-  toast(dir ? `CSS の検索フォルダ: ${dir}` : 'CSS の検索フォルダの指定を解除しました')
+  toast(dirs.length ? `CSS の検索フォルダ: ${dirs.join(' / ')}` : 'CSS の検索フォルダの指定を解除しました')
+}
+
+// 「表示」セレクト用にパスを短く表示する。長い場合は中間を省略し、
+// 「先頭フォルダ/…/親フォルダ/ファイル名」の形にする（完全なパスは tooltip で見せる）
+function shortenPath(p, max = 44) {
+  if (p.length <= max) return p
+  const segs = p.split('/')
+  const name = segs.pop()
+  const parent = segs.pop()
+  const head = segs.length ? segs[0] : ''
+  const tail = parent ? `${parent}/${name}` : name
+  const cand = head ? `${head}/…/${tail}` : `…/${tail}`
+  if (cand.length <= max) return cand
+  return tail.length <= max ? `…/${tail}` : `…/${name}`
 }
 
 async function classifyCss() {
@@ -439,7 +485,7 @@ async function classifyCss() {
     if (m) themeList.push({ path: p, theme: m[1], css })
     else styleList.push({ path: p, css })
   }
-  if (cssDir && !styleList.length && !themeList.length) toast(`${cssDir} に CSS が見つかりません`)
+  if (cssDirs.length && !styleList.length && !themeList.length) toast(`${cssDirs.join(' / ')} に CSS が見つかりません`)
   // 既定の標準 CSS（自動判別が標準のとき・初期選択に使用）
   const guess = styleList.find((s) => /markdown.*preview|preview.*markdown|github/i.test(s.path))
   const defStyle = guess || styleList[0] || null
@@ -455,8 +501,9 @@ async function classifyCss() {
     for (const s of styleList) {
       const o = document.createElement('option')
       o.value = 'std:' + s.path
-      o.textContent = s.path
-      o.dataset.base = s.path // (default) マーカー再付与用の元ラベル
+      o.textContent = shortenPath(s.path)
+      o.dataset.base = o.textContent // (default) マーカー再付与用の元ラベル
+      o.title = s.path // 省略していない完全なパス
       g.appendChild(o)
     }
     $view.appendChild(g)
@@ -473,8 +520,9 @@ async function classifyCss() {
     for (const t of themeList) {
       const o = document.createElement('option')
       o.value = 'marp:' + t.theme
-      o.textContent = `${t.theme} (${t.path})`
+      o.textContent = `${t.theme} (${shortenPath(t.path)})`
       o.dataset.base = o.textContent
+      o.title = `${t.theme} (${t.path})`
       g.appendChild(o)
     }
     $view.appendChild(g)
@@ -491,6 +539,9 @@ function updateDefaultMarker() {
     const base = o.dataset.base || o.textContent
     o.textContent = o.value === def ? `${base} (default)` : base
   }
+  // 表示は省略形なので、選択中の完全なパスは tooltip で見せる
+  const cur = $view.selectedOptions[0]
+  $view.title = cur && cur.title ? cur.title : '表示'
 }
 
 // 初期選択に使う view 値（既定 CSS → 無ければ先頭の選択肢）
@@ -1078,6 +1129,7 @@ function onIframeLoad(tab) {
     },
     { passive: false }
   )
+  setupPan(tab) // スペース + ドラッグでの画面移動
   doc.addEventListener('keydown', handleZoomKey) // iframe 内フォーカス時のショートカット
   doc.addEventListener('keydown', handlePrintKey) // iframe 内で Ctrl+P
   // リンク: 外部 → ブラウザ別タブ / 内部 → 通常クリックは同じタブで遷移
@@ -1352,6 +1404,10 @@ function openCssDirDialog() {
     toast('先にフォルダを開いてください')
     return
   }
+  const tree = cssDirTree()
+  let sel = [...cssDirs] // 決定するまではダイアログ内だけの状態
+  const open = new Set() // 展開中のフォルダ
+
   const overlay = document.createElement('div')
   overlay.className = 'modal-overlay'
   const box = document.createElement('div')
@@ -1360,34 +1416,25 @@ function openCssDirDialog() {
   title.className = 'modal-title'
   title.textContent = 'CSS の検索フォルダ'
 
-  const info = document.createElement('div')
-  info.className = 'modal-note'
-  info.textContent = `対象フォルダ: ${rootHandle.name}`
+  const bar = document.createElement('div')
+  bar.className = 'dirpick-bar'
+  const rootEl = document.createElement('div')
+  rootEl.className = 'dirpick-path'
+  rootEl.textContent = rootHandle.name
+  const countEl = document.createElement('div')
+  countEl.className = 'dirpick-count'
+  countEl.textContent = `.css ${tree.count} 件`
+  bar.append(rootEl, countEl)
 
-  const row = document.createElement('label')
-  row.className = 'modal-row'
-  const cap = document.createElement('span')
-  cap.textContent = 'フォルダ'
-  const sel = document.createElement('select')
-  sel.className = 'modal-input'
-  sel.style.maxWidth = '420px'
-  const o0 = document.createElement('option')
-  o0.value = ''
-  o0.textContent = '（ルート以下すべて）'
-  sel.appendChild(o0)
-  for (const [dir, n] of cssDirCandidates()) {
-    const o = document.createElement('option')
-    o.value = dir
-    o.textContent = `${dir}  (${n})`
-    sel.appendChild(o)
-  }
-  sel.value = cssDir
-  row.append(cap, sel)
+  const list = document.createElement('div')
+  list.className = 'dirpick'
+  const chips = document.createElement('div')
+  chips.className = 'dirpick-chips'
 
   const note = document.createElement('div')
   note.className = 'modal-note'
   note.textContent =
-    '選んだフォルダ以下の .css だけを「表示」の候補にします（marp テーマも同じ）。設定はブラウザに保存され、開いたフォルダごとに別々に記憶します。'
+    'チェックしたフォルダ以下の .css だけを「表示」の候補にします（marp テーマも同じ）。複数選択でき、何も選ばなければルート以下すべてが対象です。`▸` で下の階層を開閉します。設定はブラウザに保存され、開いたフォルダごとに別々に記憶します。'
 
   const btns = document.createElement('div')
   btns.className = 'modal-btns'
@@ -1396,24 +1443,125 @@ function openCssDirDialog() {
   cancel.textContent = 'キャンセル'
   const save = document.createElement('button')
   save.className = 'tbtn'
-  save.textContent = '保存'
+  save.textContent = '決定'
   btns.append(cancel, save)
 
-  box.append(title, info, row, note, btns)
+  box.append(title, bar, list, chips, note, btns)
   overlay.append(box)
   document.body.append(overlay)
   const close = () => overlay.remove()
+
+  // 選択済みフォルダの親をあらかじめ開いておく（開いた時点で選択が見える）
+  for (const d of sel) {
+    const segs = d.split('/')
+    for (let k = 1; k < segs.length; k++) open.add(segs.slice(0, k).join('/'))
+  }
+
+  function makeRow(node, label, depth, hasKids) {
+    const row = document.createElement('div')
+    row.className = 'row'
+    row.style.paddingLeft = 8 + depth * 14 + 'px'
+    row.title = node.path
+    const caret = document.createElement('span')
+    caret.className = 'caret' + (hasKids ? '' : ' none')
+    caret.textContent = hasKids ? (open.has(node.path) ? '▾' : '▸') : ''
+    if (hasKids) {
+      caret.addEventListener('click', (e) => {
+        e.stopPropagation()
+        if (open.has(node.path)) open.delete(node.path)
+        else open.add(node.path)
+        render()
+      })
+    }
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    const covered = coveredByCssDir(node.path, sel)
+    cb.checked = sel.includes(node.path) || covered
+    cb.disabled = covered // 上位が選ばれていれば個別指定は不要
+    if (covered) row.title = `${node.path}（上位フォルダで選択済み）`
+    cb.addEventListener('change', () => {
+      sel = cb.checked ? addCssDir(sel, node.path) : sel.filter((d) => d !== node.path)
+      render()
+    })
+    const ic = document.createElement('span')
+    ic.className = 'mi-icon'
+    ic.innerHTML = ICONS.folder
+    const tx = document.createElement('span')
+    tx.className = 'nm'
+    tx.textContent = label
+    const n = document.createElement('span')
+    n.className = 'n'
+    n.textContent = node.count
+    row.append(caret, cb, ic, tx, n)
+    // 名前クリックは開閉（子が無ければチェックの切り替え）
+    tx.addEventListener('click', () => {
+      if (!hasKids) {
+        if (cb.disabled) return
+        cb.checked = !cb.checked
+        cb.dispatchEvent(new Event('change'))
+        return
+      }
+      if (open.has(node.path)) open.delete(node.path)
+      else open.add(node.path)
+      render()
+    })
+    return row
+  }
+
+  // css を含むフォルダを丸ごと一覧表示（1 本道の階層は 1 行に畳む）
+  function addRows(node, depth) {
+    for (const child of node.children.values()) {
+      const { node: n, label } = compressCssDirNode(child)
+      const hasKids = n.children.size > 0
+      list.appendChild(makeRow(n, label, depth, hasKids))
+      if (hasKids && open.has(n.path)) addRows(n, depth + 1)
+    }
+  }
+
+  function render() {
+    list.innerHTML = ''
+    addRows(tree, 0)
+    if (!list.children.length) {
+      const e = document.createElement('div')
+      e.className = 'dirpick-empty'
+      e.textContent = '.css を含むフォルダがありません。'
+      list.appendChild(e)
+    }
+    // 選択中のフォルダ（× で解除）
+    chips.innerHTML = ''
+    if (!sel.length) {
+      const e = document.createElement('span')
+      e.className = 'dirpick-none'
+      e.textContent = '未選択（ルート以下すべてが対象）'
+      chips.appendChild(e)
+    }
+    for (const d of sel) {
+      const chip = document.createElement('span')
+      chip.className = 'chip'
+      chip.title = d
+      const t = document.createElement('span')
+      t.textContent = d.split('/').slice(-1)[0]
+      const x = document.createElement('button')
+      x.textContent = '×'
+      x.title = '選択から外す'
+      x.addEventListener('click', () => {
+        sel = sel.filter((v) => v !== d)
+        render()
+      })
+      chip.append(t, x)
+      chips.appendChild(chip)
+    }
+  }
+  render()
 
   cancel.addEventListener('click', close)
   overlay.addEventListener('mousedown', (e) => {
     if (e.target === overlay) close()
   })
   save.addEventListener('click', async () => {
-    const dir = sel.value
     close()
-    if (dir !== cssDir) await setCssDir(dir)
+    if (sel.length !== cssDirs.length || sel.some((d, k) => d !== cssDirs[k])) await setCssDirs(sel)
   })
-  sel.focus()
 }
 
 // ---- 設定（ポート） ---------------------------------------------------------
@@ -1938,6 +2086,87 @@ function handleZoomKey(e) {
     e.preventDefault()
     setActiveZoom(1)
   }
+}
+
+// ---- スペース + ドラッグで画面移動（パン） -----------------------------------
+
+let spaceDown = false // スペースキーを押している間だけパンできる
+let panning = false // ドラッグ中
+
+// スペースが本来の役割を持つ要素（ボタンの実行 / 入力欄への空白入力）では横取りしない
+const isInteractive = (el) =>
+  !!el && (el.isContentEditable || /^(input|textarea|select|button|a|summary)$/i.test(el.tagName))
+
+function onPanKeyDown(e) {
+  if (e.code !== 'Space' || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return
+  if (isInteractive(e.target)) return
+  e.preventDefault() // スペースによる既定のスクロールを止める
+  if (spaceDown) return
+  spaceDown = true
+  updatePanCursor()
+}
+
+function onPanKeyUp(e) {
+  if (e.code !== 'Space') return
+  spaceDown = false
+  updatePanCursor()
+}
+
+// パン中のカーソル。リンク等の cursor 指定に勝つよう、iframe 文書へ !important で流し込む
+function updatePanCursor() {
+  const t = tabs.get(activePath)
+  if (!t || isPdfPath(t.path)) return
+  const doc = t.iframe.contentDocument
+  if (!doc || !doc.head) return
+  let el = doc.getElementById('mdp-pan-cursor')
+  const cursor = panning ? 'grabbing' : spaceDown ? 'grab' : ''
+  if (!cursor) {
+    if (el) el.remove()
+    return
+  }
+  if (!el) {
+    el = doc.createElement('style')
+    el.id = 'mdp-pan-cursor'
+    doc.head.appendChild(el)
+  }
+  el.textContent = `*{cursor:${cursor} !important;}`
+}
+
+// iframe 文書にパンのドラッグ操作を仕込む（スクロールは文書側で起きるため）
+function setupPan(tab) {
+  const doc = tab.iframe.contentDocument
+  const sc = doc.scrollingElement || doc.documentElement
+  if (!sc) return
+  let from = null
+  doc.addEventListener('pointerdown', (e) => {
+    if (!spaceDown || e.button !== 0) return
+    e.preventDefault() // テキスト選択を始めさせない
+    from = { x: e.clientX, y: e.clientY, left: sc.scrollLeft, top: sc.scrollTop }
+    panning = true
+    updatePanCursor()
+    // iframe の外へポインタが出ても追従できるよう捕捉する
+    try {
+      doc.documentElement.setPointerCapture(e.pointerId)
+    } catch {}
+  })
+  doc.addEventListener('pointermove', (e) => {
+    if (!from) return
+    e.preventDefault()
+    // つかんだ位置を保つ = ドラッグと逆方向にスクロールする
+    sc.scrollLeft = from.left - (e.clientX - from.x)
+    sc.scrollTop = from.top - (e.clientY - from.y)
+  })
+  const end = () => {
+    if (!from) return
+    from = null
+    panning = false
+    updatePanCursor()
+  }
+  doc.addEventListener('pointerup', end)
+  doc.addEventListener('pointercancel', end)
+  doc.addEventListener('lostpointercapture', end)
+  doc.addEventListener('keydown', onPanKeyDown)
+  doc.addEventListener('keyup', onPanKeyUp)
 }
 
 // ---- タブ / プレビュー -------------------------------------------------------
@@ -2508,6 +2737,7 @@ $tabs.addEventListener(
 // 開閉はスプリッタのドラッグ判定（makeDrag の onToggle）で処理する
 // 「表示」変更はアクティブなタブにのみ適用・保持する
 $view.addEventListener('change', () => {
+  updateDefaultMarker() // tooltip を選択中のパスへ更新
   const t = tabs.get(activePath)
   if (!t) return
   t.view = $view.value
@@ -2517,6 +2747,14 @@ $zoomSelect.addEventListener('change', () => setActiveZoom(parseFloat($zoomSelec
 $zoomIn.addEventListener('click', () => stepZoom(1))
 $zoomOut.addEventListener('click', () => stepZoom(-1))
 document.addEventListener('keydown', handleZoomKey)
+document.addEventListener('keydown', onPanKeyDown)
+document.addEventListener('keyup', onPanKeyUp)
+// フォーカスを失うと keyup を取り逃すため、押しっぱなし状態を解除する
+window.addEventListener('blur', () => {
+  if (!spaceDown) return
+  spaceDown = false
+  updatePanCursor()
+})
 document.addEventListener('keydown', handlePrintKey)
 $btnSource.addEventListener('click', () => {
   const t = tabs.get(activePath)

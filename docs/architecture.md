@@ -90,7 +90,7 @@
 │   │       ├─ .splitter#split-right
 │   │       └─ #sidebar-right  見出しアウトライン
 │   └─（右スプリッタ/右サイドバーは content-row 内）
-└─ #footer            フッター（🖨 / </> ソース / ズーム / CSS の検索フォルダ / 表示）
+└─ #footer            フッター（🖨 / </> ソース / ズーム / 表示 / CSS の検索フォルダ）
 
 サーバは静的配信とローカル運用の API（`/__config` `/__shutdown` `/__restart`）だけなので、
 `public/` を静的ホスティング（GitHub Pages）に置いても動く。その場合はビルドフラグ
