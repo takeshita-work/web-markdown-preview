@@ -123,7 +123,7 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 
 - 定義元は `package.json` の `version` のみ。esbuild の `define` で `__APP_VERSION__` としてバンドルに埋め込む（`src/server.js` の `buildOptions` と `scripts/build-exe.mjs` の両方）。
 - クライアントは `APP_VERSION` として参照し、以下の 3 箇所に表示する。
-  - ヘッダー右端の **☰ メニュー末尾**（クリック不可の情報行 `.mi-static`）
+  - ヘッダー右端の **☰ メニュー末尾**（クリック不可の情報行 `.mi-static`）。公開（GitHub Pages）版は ☰ を出さず、**その位置に `v0.1.9` のように直接表示**する
   - **設定ダイアログ**の冒頭（`version x.y.z / 現在のポート: N`）
   - ☰ ボタンの **tooltip**
 - `define` されない経路でバンドルした場合は `'dev'` にフォールバックする。
@@ -140,6 +140,7 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 - `__HOSTED__` … ローカルサーバの有無を表すビルドフラグ。クライアントは `HOSTED` として参照し、
   **サーバに依存する機能を出さない**（☰ の「設定」＝`/__config` と「アプリを終了」＝`/__shutdown`）。
   ローカル向けビルド（`src/server.js` / `scripts/build-exe.mjs`）では `false`。
+  メニューの中身がバージョン表示だけになるため、公開版では ☰ を出さず**その位置にバージョンを直接表示**する（`.tbtn.version-label`）。
 - リポジトリ側の準備: **Settings → Pages → Source = GitHub Actions**（初回のみ手動）。
 - 公開版の制約はローカル版と同じ（Chrome / Edge 限定、フォルダのアクセス許可は訪問ごと）。
   初回ダウンロードは `bundle.js` 約 3.8MB（gzip 約 1.2MB）。

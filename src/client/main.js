@@ -2712,15 +2712,23 @@ $btnPrint.innerHTML = ICONS.printer
 $btnReload.innerHTML = ICONS.reload
 $btnBack.innerHTML = ICONS.back
 $btnForward.innerHTML = ICONS.forward
-$btnMenu.innerHTML = ICONS.menu
 $btnCssDir.innerHTML = ICONS.folder
 $btnCssDir.addEventListener('click', openCssDirDialog)
-$btnMenu.title = `メニュー（version ${APP_VERSION}）`
-$btnMenu.addEventListener('click', (e) => {
-  e.stopPropagation() // document の click→hideCtx で即閉じしないように
-  if (ctxEl.style.display === 'block') hideCtx() // 開いていればトグルで閉じる
-  else openMenu($btnMenu)
-})
+if (HOSTED) {
+  // 公開版はメニューの中身がバージョン表示だけになるため、
+  // ☰ を出さずにその位置へバージョンをそのまま表示する
+  $btnMenu.textContent = `v${APP_VERSION}`
+  $btnMenu.classList.add('version-label')
+  $btnMenu.title = `web markdown preview v${APP_VERSION}`
+} else {
+  $btnMenu.innerHTML = ICONS.menu
+  $btnMenu.title = `メニュー（version ${APP_VERSION}）`
+  $btnMenu.addEventListener('click', (e) => {
+    e.stopPropagation() // document の click→hideCtx で即閉じしないように
+    if (ctxEl.style.display === 'block') hideCtx() // 開いていればトグルで閉じる
+    else openMenu($btnMenu)
+  })
+}
 
 $openBtn.addEventListener('click', openFolder)
 $openPathBtn.addEventListener('click', openPathDialog)

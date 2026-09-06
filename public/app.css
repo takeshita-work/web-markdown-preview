@@ -205,6 +205,9 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .tbtn:hover { background: #e8e8e8; }
 .tbtn.on { background: #d7ebff; border-color: #9cc6ee; }
 .tbtn:disabled { opacity: .4; cursor: default; }
+/* 公開（GitHub Pages）版: ☰ の位置に出すバージョン表示。ボタンには見せない */
+.tbtn.version-label { border: 0; background: none; color: #999; cursor: default; padding: 4px 2px; }
+.tbtn.version-label:hover { background: none; }
 /* メニュー（ハンバーガー）ボタン: ヘッダー右端・グレーアイコン */
 #btn-menu { margin-left: auto; color: #555; }
 /* 確認ダイアログの実行ボタン（グレー） */
