@@ -51,7 +51,7 @@ export async function startServer({ port = null, watch = false } = {}) {
     minify: true,
     sourcemap: false,
     logLevel: 'info',
-    define: { __APP_VERSION__: JSON.stringify(readVersion()) },
+    define: { __APP_VERSION__: JSON.stringify(readVersion()), __HOSTED__: 'false' },
   }
 
   if (watch) {

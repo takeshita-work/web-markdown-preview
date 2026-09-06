@@ -128,11 +128,28 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
   - ☰ ボタンの **tooltip**
 - `define` されない経路でバンドルした場合は `'dev'` にフォールバックする。
 
+## GitHub Pages への公開（静的ホスティング）
+
+描画はすべてクライアント側なので、`public/` をそのまま静的配信すれば動く。File System Access API は
+**セキュアコンテキスト**が条件で、GitHub Pages は https なので満たす。読み込んだファイルは blob URL と
+`srcdoc` でその場に描画するだけで、**どこにも送信されない**。
+
+- `.github/workflows/pages.yml` … `main` への push（または手動実行）で `node scripts/build-web.mjs` →
+  `public/` を `upload-pages-artifact` → `deploy-pages`。`public/bundle.js` は Git 管理外なので CI で生成する。
+- `scripts/build-web.mjs` … 公開用バンドル。`__HOSTED__ = true` を `define` する。
+- `__HOSTED__` … ローカルサーバの有無を表すビルドフラグ。クライアントは `HOSTED` として参照し、
+  **サーバに依存する機能を出さない**（☰ の「設定」＝`/__config` と「アプリを終了」＝`/__shutdown`）。
+  ローカル向けビルド（`src/server.js` / `scripts/build-exe.mjs`）では `false`。
+- リポジトリ側の準備: **Settings → Pages → Source = GitHub Actions**（初回のみ手動）。
+- 公開版の制約はローカル版と同じ（Chrome / Edge 限定、フォルダのアクセス許可は訪問ごと）。
+  初回ダウンロードは `bundle.js` 約 3.8MB（gzip 約 1.2MB）。
+
 ## ビルドの仕組み
 
 - `src/server.js` の `startServer()` が起動時に esbuild で `src/client/main.js` を `public/bundle.js` にバンドル（`format: esm`, `platform: browser`, `minify`, `define` でバージョン埋め込み）。
 - `--watch` 時は `esbuild.context().watch()` で監視し、`src/client` を編集すると自動リビルド。ブラウザはハードリロード（Ctrl+Shift+R）で反映。
-- `public/bundle.js` は生成物なので Git 管理しない（`.gitignore`）。
+- `public/bundle.js` は生成物なので Git 管理しない（`.gitignore`）。CI（Releases / Pages）でも都度生成する。
+- `define` は 2 つ: `__APP_VERSION__`（表示用バージョン）と `__HOSTED__`（静的ホスティング向けか）。
 
 ## 依存
 
@@ -148,6 +165,9 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 
 - **状態** … `fileMap`（path→FileSystemFileHandle）、`themeList` / `styleList`（CSS 分類）、`tabs`（開いているタブ）、`activePath` / `previewPath`。
 - **タブ** … `{ iframe, path, handle, view, defaultView, source, zoom:{rendered,source}, preview, prevSrc, ... }`。
+- **フォルダごとの設定** … `localStorage['mdpreview.folderSettings']` = `{ "<フォルダ名>": { cssDir } }`。`loadFolderSettings()` / `saveFolderSettings()`。`loadRoot()` で復元し、`classifyCss()` が `inCssDir()` で `.css` を絞り込む。候補は `cssDirCandidates()`（`.css` を含むディレクトリとその親＋配下の件数）、変更は `setCssDir()`（再分類 → 候補外の CSS を選んでいたタブは `view` を既定に戻して再描画）。UI は `openCssDirDialog()`（フッターの `#btn-cssdir`。状態表示は `updateCssDirUI()`）。
+- **土台 CSS** … `BASE_STD_CSS`（標準表示のみ）。選択 CSS の直前に注入する最小限のコードブロック用スタイル（余白・端での折り返し・行間）。`!important` 無し・後勝ちなので、テーマ側に同じ指定があればそちらが優先される。上書き専用 CSS（VS Code の `markdown.styles` 等）への対策。
+- **コードブロックの行** … `splitCodeLines()` / `wrapCodeLines()` が `fence` / `code_block` の既定レンダラをラップし、`<code>` の中身を 1 行ずつ `span.mdp-cl`（`display:block`）に分割する。`line-height` だけでは折り返しと改行を区別できないため、改行の間だけ `margin` を入れるにはブロック化が必要。改行文字自体は `span.mdp-nl`（`display:none`）が保持するので、`textContent`（＝turndown による選択範囲のソースコピー）は元のテキストと一致する。marp は別の markdown-it インスタンスのため対象外。
 - **レンダリング** … `renderTab()` → `buildDocument()`。.md は markdown-it / marp-core、.pdf は blob URL。`onIframeLoad()` でズーム適用・見出し抽出・スクロール同期・リンク/右クリック購読。
 - **行番号同期** … markdown-it の core ルール `mdp_line_numbers` で `data-line` を付与（`env.mdpLineOffset` で frontmatter 補正）。
 - **ズーム** … `ZOOM_LEVELS` 段階、`applyZoomToTab(tab, anchor)`（標準 / ソース=`applyScaleToBody()` の `transform: scale()` / marp=SVG 寸法）。`anchor`（iframe 内クライアント座標。既定は表示領域の中央）を渡すと `captureZoomAnchor()` / `restoreZoomAnchor()` でその点の内容が動かないようスクロール位置を補正する。初回ロード時は `anchor` を渡さない。

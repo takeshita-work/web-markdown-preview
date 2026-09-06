@@ -20,6 +20,26 @@ md.core.ruler.push('mdp_line_numbers', (state) => {
     if (t.map && t.nesting !== -1) t.attrSet('data-line', String(t.map[0] + off))
   }
 })
+// コードブロックは 1 行（＝ソースの 1 論理行）ずつ span でブロック化する。
+// 折り返した行は行間を詰めたまま、改行の間だけ余白を空けられるようにするため
+// （line-height だけでは折り返しと改行を区別できない）。
+// 改行文字そのものは display:none の span に持たせ、textContent が元のテキストと
+// 一致するようにしておく（選択範囲のソースコピー = turndown が textContent を使う）。
+const splitCodeLines = (escaped) =>
+  escaped
+    .replace(/\n$/, '')
+    .split('\n')
+    .map((line, i) => (i ? `<span class="mdp-nl">\n</span>` : '') + `<span class="mdp-cl">${line}</span>`)
+    .join('')
+// 既定のレンダラを活かしたまま <code> の中身だけ差し替える（言語クラスや data-line は既定のまま）
+const wrapCodeLines = (rule) => (tokens, idx, opts, env, self) =>
+  rule(tokens, idx, opts, env, self).replace(
+    /(<code[^>]*>)([\s\S]*)(<\/code>)/,
+    (m, open, body, close) => open + splitCodeLines(body) + close
+  )
+md.renderer.rules.fence = wrapCodeLines(md.renderer.rules.fence)
+md.renderer.rules.code_block = wrapCodeLines(md.renderer.rules.code_block)
+
 // レンダリング表示での選択範囲を Markdown ソースに戻すための変換器
 const turndown = new TurndownService({ codeBlockStyle: 'fenced', headingStyle: 'atx', bulletListMarker: '-' })
 turndown.use(gfm) // テーブル / 打ち消し線 / タスクリストに対応
@@ -28,17 +48,23 @@ turndown.use(gfm) // テーブル / 打ち消し線 / タスクリストに対�
 // define されていない環境（直接読み込み等）でも壊れないようフォールバックする。
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
 
+// 静的ホスティング（GitHub Pages）向けビルドか。ローカルサーバが無いので
+// サーバに依存する機能（ポート設定 / アプリ終了）を出さない。esbuild の define で切り替える。
+const HOSTED = typeof __HOSTED__ !== 'undefined' ? __HOSTED__ : false
+
 const LS = {
   leftWidth: 'mdpreview.leftWidth',
   rightWidth: 'mdpreview.rightWidth',
   leftHidden: 'mdpreview.leftHidden',
   rightHidden: 'mdpreview.rightHidden',
+  folderSettings: 'mdpreview.folderSettings', // 開いたフォルダごとの設定 { "<フォルダ名>": { cssDir } }
 }
 
 // ---- 状態 -------------------------------------------------------------------
 
 let rootHandle = null
 const fileMap = new Map() // posixPath -> FileSystemFileHandle
+let cssDir = '' // CSS を探す起点（ルートからの相対パス。'' ならルート以下すべて）
 let themeList = [] // [{ path, theme, css }]
 let styleList = [] // [{ path, css }]
 let defaultStdCss = '' // 既定 CSS のテキスト
@@ -70,6 +96,7 @@ const $tabs = document.getElementById('tabs')
 const $preview = document.getElementById('preview')
 const $empty = document.getElementById('empty')
 const $view = document.getElementById('view')
+const $btnCssDir = document.getElementById('btn-cssdir')
 const $openBtn = document.getElementById('open-folder')
 const $rootName = document.getElementById('root-name')
 const $openPathBtn = document.getElementById('open-path')
@@ -172,6 +199,7 @@ async function loadRoot() {
   swapFileMap(newMap)
   lastTreeSig = treeSignature(tree)
   renderTree(tree) // 初期はすべて折りたたみ
+  loadFolderSettings() // このフォルダに保存された設定（CSS の検索フォルダ）を復元
   await classifyCss()
 }
 
@@ -328,11 +356,79 @@ function swapFileMap(newMap) {
   for (const [k, v] of newMap) fileMap.set(k, v)
 }
 
+// ---- 開いたフォルダごとの設定（localStorage） --------------------------------
+// キーは選んだフォルダ名。別のフォルダを開けば別の設定になる。
+// （File System Access API はフルパスを返さないため、同名の別フォルダは区別できない）
+
+function readFolderSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(LS.folderSettings)) || {}
+  } catch {
+    return {}
+  }
+}
+
+function loadFolderSettings() {
+  const s = (rootHandle && readFolderSettings()[rootHandle.name]) || {}
+  cssDir = typeof s.cssDir === 'string' ? s.cssDir : ''
+  updateCssDirUI()
+}
+
+// フッターのボタンを現在の指定に同期（限定中は on 表示、tooltip に指定先）
+function updateCssDirUI() {
+  $btnCssDir.disabled = !rootHandle
+  $btnCssDir.classList.toggle('on', !!cssDir)
+  $btnCssDir.title = `CSS の検索フォルダ: ${cssDir || 'ルート以下すべて'}`
+}
+
+function saveFolderSettings(patch) {
+  if (!rootHandle) return
+  const all = readFolderSettings()
+  all[rootHandle.name] = { ...(all[rootHandle.name] || {}), ...patch }
+  localStorage.setItem(LS.folderSettings, JSON.stringify(all))
+}
+
+// cssDir 配下かどうか（'' なら制限なし）
+const inCssDir = (p) => !cssDir || p.startsWith(cssDir + '/')
+
+// 「CSS の検索フォルダ」候補: css を含むディレクトリとその親（配下の css 数つき）
+function cssDirCandidates() {
+  const counts = new Map()
+  for (const p of fileMap.keys()) {
+    if (!p.toLowerCase().endsWith('.css')) continue
+    const segs = p.split('/')
+    segs.pop() // ファイル名を除く
+    let cur = ''
+    for (const seg of segs) {
+      cur = cur ? cur + '/' + seg : seg
+      counts.set(cur, (counts.get(cur) || 0) + 1)
+    }
+  }
+  if (cssDir && !counts.has(cssDir)) counts.set(cssDir, 0) // 現在の指定は候補に無くても残す
+  return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ja'))
+}
+
+// CSS の検索フォルダを変更して即座に反映する
+async function setCssDir(dir) {
+  cssDir = dir
+  saveFolderSettings({ cssDir: dir })
+  updateCssDirUI()
+  await classifyCss()
+  // 候補から外れた CSS を選んでいたタブは既定へ戻す
+  for (const t of tabs.values()) {
+    if (t.view.startsWith('std:') && !styleList.some((x) => 'std:' + x.path === t.view)) t.view = ''
+    renderTab(t)
+  }
+  syncPreview()
+  toast(dir ? `CSS の検索フォルダ: ${dir}` : 'CSS の検索フォルダの指定を解除しました')
+}
+
 async function classifyCss() {
   themeList = []
   styleList = []
   for (const [p, h] of fileMap) {
     if (!p.toLowerCase().endsWith('.css')) continue
+    if (!inCssDir(p)) continue // 指定フォルダ以外の CSS は読み込まない（候補にも出さない）
     let css = ''
     try {
       css = await (await h.getFile()).text()
@@ -343,6 +439,7 @@ async function classifyCss() {
     if (m) themeList.push({ path: p, theme: m[1], css })
     else styleList.push({ path: p, css })
   }
+  if (cssDir && !styleList.length && !themeList.length) toast(`${cssDir} に CSS が見つかりません`)
   // 既定の標準 CSS（自動判別が標準のとき・初期選択に使用）
   const guess = styleList.find((s) => /markdown.*preview|preview.*markdown|github/i.test(s.path))
   const defStyle = guess || styleList[0] || null
@@ -700,6 +797,19 @@ async function ensureLazyImagesLoaded(tab) {
   )
 }
 
+// 選択 CSS の「土台」。VS Code の markdown.styles のような上書き専用 CSS は、
+// エディタ組み込みの CSS があることを前提に色だけを指定していることが多く、そのままだと
+// コードブロックの余白などが失われる。選択 CSS より前に置き !important も使わないので、
+// 完全なテーマ（github-markdown.css 等）を選んだ場合はテーマ側の指定が優先される。
+// 長い行は横スクロールではなく折り返す（ソース表示の pre と同じ扱い）。
+const BASE_STD_CSS = `
+pre{padding:16px; overflow:auto; border-radius:6px; white-space:pre-wrap; word-break:break-word; line-height:1.3;}
+pre .mdp-cl{display:block;}
+pre .mdp-nl + .mdp-cl{margin-top:.45em;}
+pre .mdp-nl{display:none;}
+pre .mdp-cl:empty::before{content:" ";} /* 空行にも行の高さを持たせる（pre-wrap なので空白は潰れない） */
+`
+
 async function buildDocument(tab, src) {
   const baseDir = posixDirname(tab.path)
 
@@ -788,6 +898,7 @@ async function buildDocument(tab, src) {
     const css = mode === 'standard' ? stdCssText : defaultStdCss
     const body = md.render(stripFrontmatter(src), { mdpLineOffset: frontmatterLineCount(src) })
     html = `<!doctype html><html><head><meta charset="utf-8">
+<style>${BASE_STD_CSS}</style>
 <style>${css}</style>
 <style>
   html{background:#525659 !important;}
@@ -1234,6 +1345,77 @@ async function quitApp() {
   document.body.append(o)
 }
 
+// ---- CSS の検索フォルダ（フォルダごとに保存） --------------------------------
+
+function openCssDirDialog() {
+  if (!rootHandle) {
+    toast('先にフォルダを開いてください')
+    return
+  }
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  const box = document.createElement('div')
+  box.className = 'modal-box'
+  const title = document.createElement('div')
+  title.className = 'modal-title'
+  title.textContent = 'CSS の検索フォルダ'
+
+  const info = document.createElement('div')
+  info.className = 'modal-note'
+  info.textContent = `対象フォルダ: ${rootHandle.name}`
+
+  const row = document.createElement('label')
+  row.className = 'modal-row'
+  const cap = document.createElement('span')
+  cap.textContent = 'フォルダ'
+  const sel = document.createElement('select')
+  sel.className = 'modal-input'
+  sel.style.maxWidth = '420px'
+  const o0 = document.createElement('option')
+  o0.value = ''
+  o0.textContent = '（ルート以下すべて）'
+  sel.appendChild(o0)
+  for (const [dir, n] of cssDirCandidates()) {
+    const o = document.createElement('option')
+    o.value = dir
+    o.textContent = `${dir}  (${n})`
+    sel.appendChild(o)
+  }
+  sel.value = cssDir
+  row.append(cap, sel)
+
+  const note = document.createElement('div')
+  note.className = 'modal-note'
+  note.textContent =
+    '選んだフォルダ以下の .css だけを「表示」の候補にします（marp テーマも同じ）。設定はブラウザに保存され、開いたフォルダごとに別々に記憶します。'
+
+  const btns = document.createElement('div')
+  btns.className = 'modal-btns'
+  const cancel = document.createElement('button')
+  cancel.className = 'tbtn'
+  cancel.textContent = 'キャンセル'
+  const save = document.createElement('button')
+  save.className = 'tbtn'
+  save.textContent = '保存'
+  btns.append(cancel, save)
+
+  box.append(title, info, row, note, btns)
+  overlay.append(box)
+  document.body.append(overlay)
+  const close = () => overlay.remove()
+
+  cancel.addEventListener('click', close)
+  overlay.addEventListener('mousedown', (e) => {
+    if (e.target === overlay) close()
+  })
+  save.addEventListener('click', async () => {
+    const dir = sel.value
+    close()
+    if (dir !== cssDir) await setCssDir(dir)
+  })
+  sel.focus()
+}
+
 // ---- 設定（ポート） ---------------------------------------------------------
 
 async function openSettings() {
@@ -1348,11 +1530,14 @@ async function openSettings() {
 // ヘッダー右端のハンバーガーから開くドロップダウン（設定 / 終了）
 function openMenu(anchor) {
   const rect = anchor.getBoundingClientRect()
-  showCtx(rect.left, rect.bottom + 4, [
-    { label: '設定', icon: ICONS.gear, action: openSettings },
-    { label: 'アプリを終了', icon: ICONS.power, action: () => confirmDialog('アプリを終了しますか？', '終了', quitApp) },
-    { label: `version ${APP_VERSION}`, static: true },
-  ])
+  const items = []
+  if (!HOSTED) {
+    // ローカルサーバがあるときだけ意味のある項目（/__config・/__shutdown を叩く）
+    items.push({ label: '設定', icon: ICONS.gear, action: openSettings })
+    items.push({ label: 'アプリを終了', icon: ICONS.power, action: () => confirmDialog('アプリを終了しますか？', '終了', quitApp) })
+  }
+  items.push({ label: `version ${APP_VERSION}`, static: true })
+  showCtx(rect.left, rect.bottom + 4, items)
   // メニューの右端をボタンの右端に合わせる
   ctxEl.style.left = Math.max(4, rect.right - ctxEl.offsetWidth) + 'px'
 }
@@ -2299,6 +2484,8 @@ $btnReload.innerHTML = ICONS.reload
 $btnBack.innerHTML = ICONS.back
 $btnForward.innerHTML = ICONS.forward
 $btnMenu.innerHTML = ICONS.menu
+$btnCssDir.innerHTML = ICONS.folder
+$btnCssDir.addEventListener('click', openCssDirDialog)
 $btnMenu.title = `メニュー（version ${APP_VERSION}）`
 $btnMenu.addEventListener('click', (e) => {
   e.stopPropagation() // document の click→hideCtx で即閉じしないように

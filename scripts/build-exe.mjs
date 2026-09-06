@@ -35,7 +35,7 @@ await esbuild.build({
   outfile: path.join(root, 'public/bundle.js'),
   minify: true,
   logLevel: 'warning',
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) }, // 画面に表示するバージョンを埋め込む
+  define: { __APP_VERSION__: JSON.stringify(pkg.version), __HOSTED__: 'false' }, // 画面に表示するバージョンを埋め込む
 })
 
 console.log('[2/7] 配布用エントリをバンドル (dist/app.cjs) ...')
