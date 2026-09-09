@@ -65,6 +65,8 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .open-bar button:not(.side-toggle):hover:not(:disabled) { background: #e8e8e8; }
 .open-bar button:not(.side-toggle):disabled { opacity: .45; cursor: default; }
 .root-name { flex: 1; font-size: 14px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 一時的に非表示のアイテムがあることを、控えめな点で示す */
+.root-name.has-hidden::after { content: "•"; margin-left: 6px; color: #bcbcbc; font-size: 12px; }
 
 /* モーダルダイアログ */
 .modal-overlay {
@@ -197,9 +199,6 @@ html { scrollbar-color: #949494 #d2d2d2; }
 .tbtn:hover { background: #e8e8e8; }
 .tbtn.on { background: #d7ebff; border-color: #9cc6ee; }
 .tbtn:disabled { opacity: .4; cursor: default; }
-/* 公開（GitHub Pages）版: ☰ の位置に出すバージョン表示。ボタンには見せない */
-.tbtn.version-label { border: 0; background: none; color: #999; padding: 4px 4px; }
-.tbtn.version-label:hover { background: #ececec; color: #555; }
 /* メニュー（ハンバーガー）ボタン: ヘッダー右端・グレーアイコン */
 #btn-menu { margin-left: auto; color: #555; }
 /* 確認ダイアログの実行ボタン（グレー） */

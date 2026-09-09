@@ -104,6 +104,25 @@ web-markdown-preview.exe run       フォアグラウンド実行（Ctrl+C で�
 - ダブルクリック運用には `dist/起動.cmd`（= `start`）/ `dist/停止.cmd`（= `stop`）を同梱。
 - dev 時は `npm run standalone -- <cmd>`（= `node src/standalone.js`、アセットは `public/` から読む）で同じ動作を確認できる。
 
+### バージョンの付け方
+
+`package.json` の `version` が単一の定義元で、タグは `v` + その値（例 `v0.2.3`）。**リリースする変更は
+必ず `version` を上げてからコミットし、同じコミットにタグを打つ**（画面のバージョン表示と配布物を
+一致させるため）。
+
+**0.x のあいだ**は次の基準で運用する。
+
+| 上げる桁 | 対象 |
+|---|---|
+| **0.MINOR.0** | 機能追加、UI の作り替え、既存の操作感が変わる変更 |
+| **0.x.PATCH** | 不具合修正、文言・見た目の微調整、docs のみの更新 |
+
+- 判断に迷ったら **MINOR を上げる**（0.x では破壊的変更が許されるが、利用者から見た変化の大きさで決める）。
+- 仕様が固まったら `1.0.0` を出し、以降は通常の semver（MAJOR = 破壊的変更 / MINOR = 後方互換の機能追加 /
+  PATCH = 修正）に移行する。
+- `v0.` で始まるタグはワークフロー側で **プレリリース扱い**になる（`release.yml` の `prerelease` 条件）。
+- 参考: v0.1.8 と v0.2.2 は機能追加を含むが PATCH で出している（この基準を決める前のため）。以後は本節に従う。
+
 ### GitHub Releases への自動公開（CI）
 
 `.github/workflows/release.yml` が **`v*` タグの push** をトリガーに windows-latest で `npm run build:exe` を実行し、`dist/web-markdown-preview.exe` と zip をリリースに添付する。
@@ -123,7 +142,7 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 
 - 定義元は `package.json` の `version` のみ。esbuild の `define` で `__APP_VERSION__` としてバンドルに埋め込む（`src/server.js` の `buildOptions` と `scripts/build-exe.mjs` の両方）。
 - クライアントは `APP_VERSION` として参照し、以下の 3 箇所に表示する。
-  - ヘッダー右端の **☰ メニュー末尾**（クリック不可の情報行 `.mi-static`）。公開（GitHub Pages）版は ☰ を出さず、**その位置に `v0.2.0` のように直接表示**する
+  - ヘッダー右端の **☰ メニュー末尾**（クリック不可の情報行 `.mi-static`）。公開版も同じ
   - **アプリ設定ダイアログ**の冒頭（`version x.y.z / 現在のポート: N`）
   - ☰ ボタンの **tooltip**
 - `define` されない経路でバンドルした場合は `'dev'` にフォールバックする。
@@ -140,7 +159,7 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 - `__HOSTED__` … ローカルサーバの有無を表すビルドフラグ。クライアントは `HOSTED` として参照し、
   **サーバに依存する機能を出さない**（☰ の「設定」＝`/__config` と「アプリを終了」＝`/__shutdown`）。
   ローカル向けビルド（`src/server.js` / `scripts/build-exe.mjs`）では `false`。
-  メニューの中身がバージョン表示だけになるため、公開版では ☰ を出さず**その位置にバージョンを直接表示**する（`.tbtn.version-label`）。
+  ☰ メニュー自体はローカル版と同じ見た目で出し、中身から「アプリ設定」「終了」を省く（バージョン行と「CSS の設定」は共通）。
 - リポジトリ側の準備: **Settings → Pages → Source = GitHub Actions**（初回のみ手動）。
 - 公開版の制約はローカル版と同じ（Chrome / Edge 限定、フォルダのアクセス許可は訪問ごと）。
   初回ダウンロードは `bundle.js` 約 3.8MB（gzip 約 1.2MB）。
@@ -167,9 +186,9 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 - **状態** … `fileMap`（path→FileSystemFileHandle）、`themeList` / `styleList`（CSS 分類）、`tabs`（開いているタブ）、`activePath` / `previewPath`。
 - **ペイン（2 分割）** … `panes = { a, b }`（各 `{ el, $tabs, $view, $empty, $loading, activePath, previewPath }`）、`focusedPane` / `splitOn`。`activePath` は「フォーカス中ペインのアクティブタブ」を映すので、ヘッダーの表示コントロール・見出し・ズームなど既存の処理はそのまま使える。表示可否は `isVisibleTab()`（＝自分のペインで前面か）で判定する。フォーカス移動は各ペインと iframe 文書の `mousedown` / `wheel` から `focusPane()` を呼ぶ（iframe 内のイベントは親に伝わらないため文書側にも登録する）。`setSplit()` で開閉（解除時は右のタブを左へ引き取る。`closeTab()` では全タブが無くなったときだけ解除し、空のペインはそのまま残す）、`moveTabToPane()` でペイン間移動（タブのドラッグ＆ドロップと右クリックメニューから呼ぶ。移動先が既にフォーカス中でも反映されるよう、末尾で必ず `renderTabs()` / `syncPreview()` を呼ぶ）。未分割時にビューの右 40% へドロップすると `setSplit(true)` 込みで右へ移す（`.pane-view.drop-right` が目印）。移動で移動元が空になったときは分割を解除するが、その移動自体が分割を開いた場合（`wasSplit === false`）は解除しない。
 - **タブ** … `{ iframe, path, handle, pane, view, defaultView, source, zoom:{rendered,source}, preview, prevSrc, ... }`。タブはファイル 1 つにつき 1 枚（同じファイルを両ペインには開けない）。
-- **一時的な非表示** … `hiddenPaths`（Set）に入れたパスは `renderNode()` が描画しない（フォルダなら配下ごと）。切り替えは `hidePath()` / `unhideAll()` → `rerenderTree()`（`lastTree` を保持しておき、展開状態とスクロール位置を維持して描き直す）。ツリーの項目は `pathMenu(e, path, true)`、余白は `#tree-pane` の `contextmenu` が担当。`loadRoot()` で解除する。
+- **一時的な非表示** … `hiddenPaths`（Set）に入れたパスは `renderNode()` が描画しない（フォルダなら配下ごと）。`updateHiddenMark()` がサイドバー見出しに `.has-hidden`（小さな点）と件数入りの tooltip を付ける。切り替えは `hidePath()` / `unhideAll()` → `rerenderTree()`（`lastTree` を保持しておき、展開状態とスクロール位置を維持して描き直す）。ツリーの項目は `pathMenu(e, path, true)`、余白は `#tree-pane` の `contextmenu` が担当。`loadRoot()` で解除する。
 - **フォルダごとの設定** … `localStorage['mdpreview.folderSettings']` = `{ "<フォルダ名>": { cssDirs: [] } }`（旧・単一指定の `cssDir` は読み込み時に配列へ移行し、保存時に消す）。`loadFolderSettings()` / `saveFolderSettings()`。`loadRoot()` で復元し、`classifyCss()` が `inCssDir()` で `.css` を絞り込む。候補は `cssDirTree()`（`.css` を含むディレクトリのツリー。`count` = 配下の総数 / `direct` = 直下の数）を開閉付きのツリー一覧で表示し、`compressCssDirNode()` が「css を持たず子が 1 つだけ」の階層を畳んで 1 行にする（深いパスでも一覧が短くなる）。選択は複数持て（`cssDirs`）、`addCssDir()` が上位・配下の重複を畳み、`coveredByCssDir()` が「上位で選択済み」の判定を行う。変更は `setCssDirs()`（再分類 → 候補外の CSS を選んでいたタブは `view` を既定に戻して再描画）。UI は `openCssDirDialog()`（☰ メニューの「CSS の設定」。指定中は項目ラベルに件数が付く）。「表示」セレクトの選択肢は `shortenPath()` で省略表示し、完全なパスは option の `title` と `$view.title`（`updateDefaultMarker()` で同期）に持たせる。
-- **土台 CSS** … `BASE_STD_CSS`（標準表示のみ）。選択 CSS の直前に注入する最小限のコードブロック用スタイル（余白・端での折り返し・行間）。`!important` 無し・後勝ちなので、テーマ側に同じ指定があればそちらが優先される。上書き専用 CSS（VS Code の `markdown.styles` 等）への対策。
+- **土台 CSS** … `BASE_STD_CSS`（標準表示のみ）。選択 CSS の直前に注入する最小限のスタイル（コードブロックの余白・折り返し・行間、表のセルの `overflow-wrap:anywhere`）。`!important` 無し・後勝ちなので、テーマ側に同じ指定があればそちらが優先される。上書き専用 CSS（VS Code の `markdown.styles` 等）への対策。
 - **コードブロックの行** … `splitCodeLines()` / `wrapCodeLines()` が `fence` / `code_block` の既定レンダラをラップし、`<code>` の中身を 1 行ずつ `span.mdp-cl`（`display:block`）に分割する。`line-height` だけでは折り返しと改行を区別できないため、改行の間だけ `margin` を入れるにはブロック化が必要。改行文字自体は `span.mdp-nl`（`display:none`）が保持するので、`textContent`（＝turndown による選択範囲のソースコピー）は元のテキストと一致する。marp は別の markdown-it インスタンスのため対象外。
 - **レンダリング** … `renderTab()` → `buildDocument()`。.md は markdown-it / marp-core、.pdf は blob URL。`onIframeLoad()` でズーム適用・見出し抽出・スクロール同期・リンク/右クリック購読。スクロール時の見出し追従（`updateActiveHeading()`）は 1 フレーム 1 回に間引く（長い文書では見出しの矩形取得が重いため）。
 - **行番号同期** … markdown-it の core ルール `mdp_line_numbers` で `data-line` を付与（`env.mdpLineOffset` で frontmatter 補正）。

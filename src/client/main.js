@@ -226,6 +226,7 @@ async function loadRoot() {
   swapFileMap(newMap)
   lastTreeSig = treeSignature(tree)
   hiddenPaths.clear() // 別のフォルダを開いたら一時非表示は解除
+  updateHiddenMark()
   lastTree = tree
   renderTree(tree) // 初期はすべて折りたたみ
   loadFolderSettings() // このフォルダに保存された設定（CSS の検索フォルダ）を復元
@@ -588,15 +589,28 @@ function rerenderTree() {
 }
 
 // 一時的に非表示にする / すべて戻す（表示だけの操作で、タブや CSS の検索には影響しない）
+// 非表示のアイテムがあることを、サイドバー見出しの小さな点で控えめに示す
+function updateHiddenMark() {
+  const has = hiddenPaths.size > 0
+  $rootName.classList.toggle('has-hidden', has)
+  $rootName.title = has
+    ? `${rootHandle ? rootHandle.name : ''}（非表示のアイテムが ${hiddenPaths.size} 件あります）`
+    : rootHandle
+      ? rootHandle.name
+      : ''
+}
+
 function hidePath(path) {
   hiddenPaths.add(path)
   rerenderTree()
+  updateHiddenMark()
   toast('非表示にしました（何もない所で右クリック →「非表示にしたものを表示する」で戻せます）')
 }
 function unhideAll() {
   const n = hiddenPaths.size
   hiddenPaths.clear()
   rerenderTree()
+  updateHiddenMark()
   toast(n ? `非表示にした ${n} 件を表示しました` : '非表示にしたものはありません')
 }
 
@@ -863,6 +877,8 @@ async function ensureLazyImagesLoaded(tab) {
 const SCROLLBAR_CSS = `html{scrollbar-color:#949494 #d2d2d2;}`
 
 const BASE_STD_CSS = `
+table{max-width:100%;}
+th,td{overflow-wrap:anywhere;} /* 長い URL などで表がシートからはみ出さないようにする */
 pre{padding:16px; overflow:auto; border-radius:6px; white-space:pre-wrap; word-break:break-word; line-height:1.3;}
 pre .mdp-cl{display:block;}
 pre .mdp-nl + .mdp-cl{margin-top:.45em;}
@@ -1855,7 +1871,7 @@ function pathMenu(e, path, inTree) {
   items.push(...copyPathItems(path))
   if (inTree) {
     items.push({ sep: true })
-    items.push({ label: '非表示にする', action: () => hidePath(path) })
+    items.push({ label: 'アイテムを非表示', action: () => hidePath(path) })
     items.push({ label: 'サイドバーを閉じる', icon: ICONS.sidebarOn, action: () => setLeftHidden(true) })
   }
   showCtx(e.clientX, e.clientY, items)
@@ -2917,15 +2933,8 @@ $btnPrint.innerHTML = ICONS.printer
 $btnReload.innerHTML = ICONS.reload
 $btnBack.innerHTML = ICONS.back
 $btnForward.innerHTML = ICONS.forward
-// 公開版は ☰ の代わりにバージョンを出す（クリックでメニューが開くのは共通）
-if (HOSTED) {
-  $btnMenu.textContent = `v${APP_VERSION}`
-  $btnMenu.classList.add('version-label')
-  $btnMenu.title = `web markdown preview v${APP_VERSION}`
-} else {
-  $btnMenu.innerHTML = ICONS.menu
-  $btnMenu.title = `メニュー（version ${APP_VERSION}）`
-}
+$btnMenu.innerHTML = ICONS.menu
+$btnMenu.title = `メニュー（version ${APP_VERSION}）`
 $btnMenu.addEventListener('click', (e) => {
   e.stopPropagation() // document の click→hideCtx で即閉じしないように
   if (ctxEl.style.display === 'block') hideCtx() // 開いていればトグルで閉じる
