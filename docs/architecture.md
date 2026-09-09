@@ -84,9 +84,12 @@
 │   ├─ #sidebar         左サイドバー（📂 + ファイルツリー）
 │   ├─ .splitter#split-left   ハンドルで開閉 / ドラッグでリサイズ
 │   ├─ #main (縦)
-│   │   ├─ #toolbar     ヘッダー（📄 + タブ）
+│   │   ├─ #toolbar     ヘッダー（← → ⟳ 📄 / 分割 / ☰）
 │   │   └─ #content-row (横)
-│   │       ├─ #preview        iframe プレビュー
+│   │       ├─ #panes (横)     2 分割ペイン
+│   │       │   ├─ .pane[data-pane=a]  .pane-tabs + .pane-view（iframe）
+│   │       │   ├─ .splitter#split-pane
+│   │       │   └─ .pane[data-pane=b]  同上（分割時のみ表示）
 │   │       ├─ .splitter#split-right
 │   │       └─ #sidebar-right  見出しアウトライン
 │   └─（右スプリッタ/右サイドバーは content-row 内）

@@ -100,6 +100,11 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .modal-note { font-size: 12px; color: #777; line-height: 1.6; }
 .tree-hint { padding: 12px; font-size: 12px; color: #999; line-height: 1.6; }
 
+/* スクロールバー: 軌道（背景）を濃いグレーにし、つまみも合わせて濃くする。
+   Windows の新しいスクロールバーでは ::-webkit-scrollbar-* が部分的にしか効かないため、
+   標準プロパティ scrollbar-color を使う（継承するので html に指定すれば全体に効く）。 */
+html { scrollbar-color: #949494 #d2d2d2; }
+
 /* CSS の検索フォルダ選択（階層をたどる） */
 .dirpick-bar { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
 .dirpick-path {
@@ -246,11 +251,7 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .tbtn svg,
 .open-bar button svg { display: block; }
 
-#tabs {
-  display: flex; gap: 2px; overflow-x: auto; flex: 1 1 auto; min-width: 0;
-  scrollbar-width: none; /* Firefox: スクロールバー非表示（ホイールでの横スクロールは可） */
-}
-#tabs::-webkit-scrollbar { display: none; } /* Chrome / Edge: スクロールバー非表示 */
+/* タブは各ペインの .pane-tabs に入る（横スクロールバーは隠す） */
 .tab {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 8px; font-size: 12px; border: 1px solid #ddd; border-bottom: none;
@@ -261,10 +262,30 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 .tab .close { color: #999; cursor: pointer; }
 .tab .close:hover { color: #c00; }
 
-#preview { flex: 1; position: relative; background: #fff; }
-#preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
-#preview iframe.hidden { display: none; }
-#empty { display: flex; height: 100%; align-items: center; justify-content: center; color: #999; }
+/* 2 分割ペイン: 各ペインがタブバー + 表示領域を持つ */
+#panes { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.pane { flex: 1 1 50%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pane[hidden] { display: none; }
+.pane-tabs {
+  display: flex; gap: 2px; align-items: flex-end; height: 27px; padding: 0 6px;
+  background: #f0f0f0; border-bottom: 1px solid #ddd; overflow-x: auto;
+  scrollbar-width: none;
+}
+.pane-tabs::-webkit-scrollbar { display: none; }
+/* 分割中はフォーカス側のタブバーを明るくして区別する */
+#panes.split .pane.focused .pane-tabs { background: #e3f0ff; }
+/* 表示領域の地色はプレビュー文書の周囲と同じ濃いグレー。
+   タブが無いペイン（分割直後など）が白く抜けて見えるのを防ぐ */
+.pane-view { flex: 1; position: relative; background: #525659; }
+.pane-view iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+.pane-view iframe.hidden { display: none; }
+.pane-view .empty { display: flex; height: 100%; align-items: center; justify-content: center; color: #c3c6c8; }
+.tab.drop-target { outline: 2px solid #7ab; }
+/* タブを右寄りにドラッグしたときの「ここで分割」の目印 */
+.pane-view.drop-right::after {
+  content: ''; position: absolute; inset: 0 0 0 60%;
+  background: rgba(120,170,220,.22); border-left: 2px solid #7ab; pointer-events: none;
+}
 /* ファイル取得中インジケータ（プレビュー上に重ねる） */
 .loading {
   position: absolute; inset: 0; z-index: 5; pointer-events: none;

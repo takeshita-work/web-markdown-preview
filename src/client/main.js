@@ -79,7 +79,7 @@ const scrollPosKey = (tab, path) => (path ?? tab.path) + (tab.source ? '::source
 // 開いているタブ: path -> { iframe, label, path, handle, lastModified, blobUrls, headings, preview }
 const tabs = new Map()
 let activePath = null
-let previewPath = null // 仮選択タブ（最大1つ。別ファイルの仮選択で置き換わる）
+// 仮選択タブ（最大1つ／ペイン）は panes[].previewPath で持つ
 
 // プレビュー対象の拡張子
 const PREVIEWABLE = /\.(md|pdf|html?)$/i
@@ -92,9 +92,27 @@ const isHtmlPath = (p) => /\.html?$/i.test(p)
 
 const $tree = document.getElementById('tree')
 const $outline = document.getElementById('outline')
-const $tabs = document.getElementById('tabs')
-const $preview = document.getElementById('preview')
-const $empty = document.getElementById('empty')
+const $panes = document.getElementById('panes')
+const $splitPane = document.getElementById('split-pane')
+const $btnSplit = document.getElementById('btn-split')
+// 2 分割のペイン。各ペインが自分のタブバー / 表示領域 / アクティブタブを持つ
+const panes = {}
+for (const el of document.querySelectorAll('.pane')) {
+  panes[el.dataset.pane] = {
+    id: el.dataset.pane,
+    el,
+    $tabs: el.querySelector('.pane-tabs'),
+    $view: el.querySelector('.pane-view'),
+    $empty: el.querySelector('.empty'),
+    $loading: el.querySelector('.loading'),
+    activePath: null,
+    previewPath: null, // 仮選択タブ（ペインごと）
+    loadingTimer: null,
+  }
+}
+let focusedPane = 'a' // フッター・見出し・ズームが対象にするペイン
+let splitOn = false
+
 const $view = document.getElementById('view')
 const $btnCssDir = document.getElementById('btn-cssdir')
 const $openBtn = document.getElementById('open-folder')
@@ -116,7 +134,7 @@ const $btnBack = document.getElementById('btn-back')
 const $btnForward = document.getElementById('btn-forward')
 const $btnMenu = document.getElementById('btn-menu')
 const $fileInfo = document.getElementById('file-info')
-const $loading = document.getElementById('loading')
+
 
 // 既定（ファイル未選択時）のタブタイトル。index.html の <title> を初期値に使う
 const DEFAULT_TITLE = document.title || 'web markdown preview'
@@ -166,6 +184,8 @@ const ICONS = {
   forward: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 12 8l-5.5 4.5"/><path d="M11.7 8H3.5"/></svg>`,
   // 電源（終了）
   power: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.4a5 5 0 1 0 6.6 0"/></svg>`,
+  // 画面分割（縦線で 2 分割した枠）
+  split: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M8 3v10"/></svg>`,
   // コピー（クリップボード）
   copy: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v1"/></svg>`,
 }
@@ -853,6 +873,10 @@ async function ensureLazyImagesLoaded(tab) {
 // コードブロックの余白などが失われる。選択 CSS より前に置き !important も使わないので、
 // 完全なテーマ（github-markdown.css 等）を選んだ場合はテーマ側の指定が優先される。
 // 長い行は横スクロールではなく折り返す（ソース表示の pre と同じ扱い）。
+// プレビュー（iframe）側のスクロールバー。アプリ UI と同じ濃さに揃える。
+// 標準プロパティ scrollbar-color（つまみ / 軌道）を使う
+const SCROLLBAR_CSS = `html{scrollbar-color:#949494 #d2d2d2;}`
+
 const BASE_STD_CSS = `
 pre{padding:16px; overflow:auto; border-radius:6px; white-space:pre-wrap; word-break:break-word; line-height:1.3;}
 pre .mdp-cl{display:block;}
@@ -882,7 +906,7 @@ async function buildDocument(tab, src) {
       })
       .join('\n')
     return `<!doctype html><html><head><meta charset="utf-8">
-<style>body{margin:0;} pre{margin:0;padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
+<style>${SCROLLBAR_CSS}body{margin:0;} pre{margin:0;padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
 @media print{ html{height:auto !important;} body{transform:none !important; width:auto !important; min-height:0 !important;} }</style>
 </head><body><pre>${body}</pre></body></html>`
   }
@@ -922,6 +946,7 @@ async function buildDocument(tab, src) {
     }
     const out = marp.render(overrideMarpTheme(src, theme))
     html = `<!doctype html><html><head><meta charset="utf-8">
+<style>${SCROLLBAR_CSS}</style>
 <style>${out.css}</style>
 <style>
   html,body{margin:0;background:#525659;}
@@ -949,7 +974,7 @@ async function buildDocument(tab, src) {
     const css = mode === 'standard' ? stdCssText : defaultStdCss
     const body = md.render(stripFrontmatter(src), { mdpLineOffset: frontmatterLineCount(src) })
     html = `<!doctype html><html><head><meta charset="utf-8">
-<style>${BASE_STD_CSS}</style>
+<style>${SCROLLBAR_CSS}${BASE_STD_CSS}</style>
 <style>${css}</style>
 <style>
   html{background:#525659 !important;}
@@ -987,16 +1012,15 @@ function firstChangedLine(a, b) {
 }
 
 // ファイル取得中インジケータ（速い読み込みでは出さないよう少し遅延して表示）
-let loadingTimer = null
-function showLoading() {
-  clearTimeout(loadingTimer)
-  loadingTimer = setTimeout(() => {
-    $loading.hidden = false
+function showLoading(pane) {
+  clearTimeout(pane.loadingTimer)
+  pane.loadingTimer = setTimeout(() => {
+    pane.$loading.hidden = false
   }, 180)
 }
-function hideLoading() {
-  clearTimeout(loadingTimer)
-  $loading.hidden = true
+function hideLoading(pane) {
+  clearTimeout(pane.loadingTimer)
+  pane.$loading.hidden = true
 }
 
 // 破棄前に現在のスクロール位置を確定させ、以後の scroll イベントで上書きされないよう購読も外す。
@@ -1020,7 +1044,7 @@ function snapshotScrollPosition(tab, forPath) {
 }
 
 async function renderTab(tab, autoScroll) {
-  if (tab.path === activePath) showLoading()
+  if (isVisibleTab(tab)) showLoading(paneOf(tab))
   snapshotScrollPosition(tab)
   try {
     const file = await tab.handle.getFile()
@@ -1074,7 +1098,7 @@ async function renderTab(tab, autoScroll) {
       tab.iframe.srcdoc = `<pre style="color:red;padding:16px">${String((e && e.stack) || e)}</pre>`
     }
   } finally {
-    if (tab.path === activePath) hideLoading()
+    if (isVisibleTab(tab)) hideLoading(paneOf(tab))
   }
 }
 
@@ -1125,12 +1149,17 @@ function onIframeLoad(tab) {
       if (!e.ctrlKey) return
       e.preventDefault()
       // 切りのいい段階で拡大縮小。カーソル位置の内容が動かないようにする
-      stepZoom(e.deltaY < 0 ? 1 : -1, { x: e.clientX, y: e.clientY })
+      stepZoom(e.deltaY < 0 ? 1 : -1, { x: e.clientX, y: e.clientY }, tab)
     },
     { passive: false }
   )
+  // iframe 内のイベントは親へ伝わらないので、プレビュー本体のクリックでも
+  // そのペインをフォーカスできるよう文書側で購読する（フッター/見出しの対象が変わる）
+  doc.addEventListener('mousedown', () => focusPane(tab.pane), true)
+  // ホイールで動かしたペインもメインにする（クリックしなくても切り替わる）
+  doc.addEventListener('wheel', () => focusPane(tab.pane), { passive: true, capture: true })
   setupPan(tab) // スペース + ドラッグでの画面移動
-  doc.addEventListener('keydown', handleZoomKey) // iframe 内フォーカス時のショートカット
+  doc.addEventListener('keydown', handleZoomKeyFor(tab)) // iframe 内フォーカス時のショートカット
   doc.addEventListener('keydown', handlePrintKey) // iframe 内で Ctrl+P
   // リンク: 外部 → ブラウザ別タブ / 内部 → 通常クリックは同じタブで遷移
   doc.addEventListener('click', (e) => handleLinkClick(e, tab, false))
@@ -1158,11 +1187,18 @@ function onIframeLoad(tab) {
   })
   // スクロール追従ハイライト（iframe 文書のスクロールを購読）+ 位置の記憶
   const sc = doc.scrollingElement || doc.documentElement
+  let headingRaf = 0
   const onScroll = () => {
     // スクロール中はピクセル値のみ（毎回アンカーを探すと重いため）。
     // 再レンダリング直前には snapshotScrollPosition がアンカー付きで上書きする。
     scrollPositions.set(scrollPosKey(tab), { top: sc.scrollTop, line: null, offset: 0 })
-    if (tab.path === activePath) updateActiveHeading(tab)
+    // 見出しの判定は文書が長いほど重い。1 フレームに 1 回へ間引く
+    if (tab.path === activePath && !headingRaf) {
+      headingRaf = requestAnimationFrame(() => {
+        headingRaf = 0
+        if (tab.path === activePath) updateActiveHeading(tab)
+      })
+    }
   }
   tab.onScroll = onScroll // renderTab 側で破棄前に外せるよう参照を保持
   doc.addEventListener('scroll', onScroll, { passive: true, capture: true })
@@ -1224,8 +1260,9 @@ function restoreScrollPosition(tab) {
   doc.addEventListener('wheel', stop, { once: true, passive: true })
   doc.addEventListener('touchstart', stop, { once: true, passive: true })
   doc.addEventListener('keydown', stop, { once: true })
+  doc.addEventListener('pointerdown', stop, { once: true, passive: true }) // パン等のドラッグ操作
   const apply = () => {
-    if (!cancelled) applyScrollState(doc, sc, st)
+    if (!cancelled && !panning) applyScrollState(doc, sc, st)
   }
   apply() // 即時反映（多くの場合はこれで十分）
   // display:none 解除直後は iframe 内部の rAF が止まっていることがあるため、
@@ -1760,10 +1797,21 @@ document.addEventListener('contextmenu', (e) => {
 
 function copyPathItems(path) {
   const name = path.split('/').pop()
-  return [
+  const t = tabs.get(path)
+  const items = []
+  if (t) {
+    // 開いているタブなら、もう一方のペインへ移せる
+    const to = t.pane === 'a' ? 'b' : 'a'
+    items.push({
+      label: to === 'b' ? '右のペインへ移動（分割）' : '左のペインへ移動',
+      icon: ICONS.split,
+      action: () => moveTabToPane(path, to),
+    })
+  }
+  return items.concat([
     { label: '相対パスをコピー', action: () => copyText(path).then((ok) => toast(ok ? 'パスをコピーしました' : 'コピーに失敗しました')) },
     { label: 'ファイル名をコピー', action: () => copyText(name).then((ok) => toast(ok ? 'ファイル名をコピーしました' : 'コピーに失敗しました')) },
-  ]
+  ])
 }
 
 function pathMenu(e, path) {
@@ -2057,34 +2105,41 @@ function updateZoomUI() {
   $zoomOut.disabled = disabled
 }
 
-// アクティブタブの現在モードのズームを設定（anchor は applyZoomToTab と同じ）
-function setActiveZoom(z, anchor) {
-  const t = tabs.get(activePath)
+// 指定タブの現在モードのズームを設定（anchor は applyZoomToTab と同じ）。
+// tab 省略時はフッター操作とみなしてフォーカス中ペインのタブに効く。
+// 分割時に「ホイールを回したペイン」へ効かせるため、iframe 側からは自分のタブを渡す。
+function setActiveZoom(z, anchor, tab) {
+  const t = tab || tabs.get(activePath)
   if (!t || isPdfPath(t.path)) return
   t.zoom[zoomKey(t)] = ZOOM_LEVELS[nearestZoomIndex(z)]
   applyZoomToTab(t, anchor || {}) // UI 操作時は表示領域の中央を基準に位置を保つ
-  updateZoomUI()
+  updateZoomUI() // フッターの表示はフォーカス中ペインのもの
 }
 
 // dir: +1 拡大 / -1 縮小（段階を1つ移動）
-function stepZoom(dir, anchor) {
-  const t = tabs.get(activePath)
+function stepZoom(dir, anchor, tab) {
+  const t = tab || tabs.get(activePath)
   if (!t || isPdfPath(t.path)) return
   const i = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, nearestZoomIndex(getZoom(t)) + dir))
-  setActiveZoom(ZOOM_LEVELS[i], anchor)
+  setActiveZoom(ZOOM_LEVELS[i], anchor, t)
 }
 
-function handleZoomKey(e) {
+// キーボードショートカット。tab を渡すとそのタブに効く（iframe 内フォーカス時）
+function handleZoomKeyFor(tab) {
+  return (e) => handleZoomKey(e, tab)
+}
+
+function handleZoomKey(e, tab) {
   if (!(e.ctrlKey && e.shiftKey)) return
   if (e.key === '+' || e.key === '=') {
     e.preventDefault()
-    stepZoom(1)
+    stepZoom(1, null, tab)
   } else if (e.key === '-' || e.key === '_') {
     e.preventDefault()
-    stepZoom(-1)
+    stepZoom(-1, null, tab)
   } else if (e.key === '0') {
     e.preventDefault()
-    setActiveZoom(1)
+    setActiveZoom(1, null, tab)
   }
 }
 
@@ -2098,10 +2153,12 @@ const isInteractive = (el) =>
   !!el && (el.isContentEditable || /^(input|textarea|select|button|a|summary)$/i.test(el.tagName))
 
 function onPanKeyDown(e) {
-  if (e.code !== 'Space' || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return
+  if (e.code !== 'Space' || e.ctrlKey || e.altKey || e.metaKey) return
   if (isInteractive(e.target)) return
-  e.preventDefault() // スペースによる既定のスクロールを止める
-  if (spaceDown) return
+  // 押しっぱなしのキーリピートも含めて既定動作（1 画面ぶんのスクロール）を止める。
+  // ここを素通りさせると、ドラッグ中にリピートのたびにページが飛んでちらつく
+  e.preventDefault()
+  if (e.repeat || spaceDown) return
   spaceDown = true
   updatePanCursor()
 }
@@ -2114,22 +2171,26 @@ function onPanKeyUp(e) {
 
 // パン中のカーソル。リンク等の cursor 指定に勝つよう、iframe 文書へ !important で流し込む
 function updatePanCursor() {
-  const t = tabs.get(activePath)
-  if (!t || isPdfPath(t.path)) return
-  const doc = t.iframe.contentDocument
-  if (!doc || !doc.head) return
-  let el = doc.getElementById('mdp-pan-cursor')
   const cursor = panning ? 'grabbing' : spaceDown ? 'grab' : ''
-  if (!cursor) {
-    if (el) el.remove()
-    return
+  // 分割時は両ペインの表示中タブに反映する（どちらでもドラッグできるため）
+  for (const t of tabs.values()) {
+    if (!isVisibleTab(t) || isPdfPath(t.path)) continue
+    const doc = t.iframe.contentDocument
+    if (!doc || !doc.head) continue
+    let el = doc.getElementById('mdp-pan-cursor')
+    if (!cursor) {
+      if (el) el.remove()
+      continue
+    }
+    if (!el) {
+      el = doc.createElement('style')
+      el.id = 'mdp-pan-cursor'
+      doc.head.appendChild(el)
+    }
+    // user-select も切る。ドラッグでテキスト選択が始まると、Chrome の選択
+    // オートスクロールがパンと競合して画面が上下にちらつくため
+    el.textContent = `*{cursor:${cursor} !important; user-select:none !important; -webkit-user-select:none !important;}`
   }
-  if (!el) {
-    el = doc.createElement('style')
-    el.id = 'mdp-pan-cursor'
-    doc.head.appendChild(el)
-  }
-  el.textContent = `*{cursor:${cursor} !important;}`
 }
 
 // iframe 文書にパンのドラッグ操作を仕込む（スクロールは文書側で起きるため）
@@ -2138,10 +2199,14 @@ function setupPan(tab) {
   const sc = doc.scrollingElement || doc.documentElement
   if (!sc) return
   let from = null
+  // 選択が始まると Chrome の選択オートスクロールと競合するので、押している間は止める
+  doc.addEventListener('mousedown', (e) => spaceDown && e.preventDefault())
+  doc.addEventListener('selectstart', (e) => (spaceDown || panning) && e.preventDefault())
+  doc.addEventListener('dragstart', (e) => (spaceDown || panning) && e.preventDefault())
   doc.addEventListener('pointerdown', (e) => {
     if (!spaceDown || e.button !== 0) return
     e.preventDefault() // テキスト選択を始めさせない
-    from = { x: e.clientX, y: e.clientY, left: sc.scrollLeft, top: sc.scrollTop }
+    from = { x: e.clientX, y: e.clientY }
     panning = true
     updatePanCursor()
     // iframe の外へポインタが出ても追従できるよう捕捉する
@@ -2152,9 +2217,12 @@ function setupPan(tab) {
   doc.addEventListener('pointermove', (e) => {
     if (!from) return
     e.preventDefault()
-    // つかんだ位置を保つ = ドラッグと逆方向にスクロールする
-    sc.scrollLeft = from.left - (e.clientX - from.x)
-    sc.scrollTop = from.top - (e.clientY - from.y)
+    // つかんだ位置を保つ = ドラッグと逆方向へ「前回からの差分」で動かす。
+    // 絶対位置で毎回上書きすると、遅延画像の読み込みやスクロールアンカリングで
+    // ブラウザ側が位置を補正したときに綱引きになり、画面がちらつく
+    sc.scrollLeft -= e.clientX - from.x
+    sc.scrollTop -= e.clientY - from.y
+    from = { x: e.clientX, y: e.clientY }
   })
   const end = () => {
     if (!from) return
@@ -2188,12 +2256,13 @@ function openTab(node, preview) {
   iframe.className = 'hidden'
   const tab = {
     iframe, label: node.name, path: node.path, handle: node.handle, lastModified: 0, blobUrls: [], headings: [],
+    pane: focusedPane, // 開いた時点でフォーカスしているペインに属する
     preview: !!preview, view: '', defaultView: '', source: false, zoom: { rendered: 1, source: 1 },
     history: [node.path], historyIndex: 0, // タブ内リンク遷移の履歴（[←][→] 用）
   }
   iframe.addEventListener('load', () => onIframeLoad(tab))
   paneObserver.observe(iframe)
-  $preview.appendChild(iframe)
+  panes[focusedPane].$view.appendChild(iframe)
   tabs.set(node.path, tab)
   renderTabs()
   activateTab(node.path)
@@ -2202,9 +2271,10 @@ function openTab(node, preview) {
 
 // 仮選択: シングルクリック。既存の仮選択タブを置き換える
 function previewFile(node) {
-  if (tabs.has(node.path)) return activateTab(node.path) // 既に開いていれば切替のみ
-  if (previewPath && previewPath !== node.path && tabs.has(previewPath)) closeTab(previewPath)
-  previewPath = node.path
+  if (tabs.has(node.path)) return activateTab(node.path) // 既に開いていれば（別ペインでも）そこへ切替
+  const pane = panes[focusedPane]
+  if (pane.previewPath && pane.previewPath !== node.path && tabs.has(pane.previewPath)) closeTab(pane.previewPath)
+  pane.previewPath = node.path
   openTab(node, true)
 }
 
@@ -2217,7 +2287,7 @@ function pinFile(node) {
     t.preview = false
     activateTab(node.path)
   }
-  if (previewPath === node.path) previewPath = null
+  for (const p of Object.values(panes)) if (p.previewPath === node.path) p.previewPath = null
   setChecked(node.path, true)
   renderTabs()
 }
@@ -2253,8 +2323,10 @@ function navigateTabTo(tab, node, pushHistory) {
   tab.view = ''
   tab.defaultView = ''
   tabs.set(node.path, tab)
+  const pane = paneOf(tab)
+  if (pane.activePath === oldPath) pane.activePath = node.path
   if (activePath === oldPath) activePath = node.path
-  if (previewPath === oldPath) previewPath = tab.preview ? node.path : null
+  if (pane.previewPath === oldPath) pane.previewPath = tab.preview ? node.path : null
   setChecked(oldPath, false)
   if (!tab.preview) setChecked(node.path, true)
   renderTabs()
@@ -2294,25 +2366,102 @@ function closeTab(path) {
   for (const u of t.blobUrls) URL.revokeObjectURL(u)
   paneObserver.unobserve(t.iframe)
   t.iframe.remove()
+  const pane = paneOf(t)
   tabs.delete(path)
-  if (previewPath === path) previewPath = null
+  if (pane.previewPath === path) pane.previewPath = null
   setChecked(path, false)
-  if (activePath === path) activePath = tabs.size ? [...tabs.keys()][tabs.size - 1] : null
+  if (pane.activePath === path) {
+    // 同じペインの残りタブへ移る（無ければ空）
+    const rest = paneTabs(pane.id)
+    pane.activePath = rest.length ? rest[rest.length - 1].path : null
+  }
+  // 空になったペインは畳む（左右どちらでも。残った側のタブを引き取る）
+  if (splitOn && !paneTabs(pane.id).length) setSplit(false)
+  focusPane(focusedPane, false) // activePath をフォーカス中ペインに合わせ直す
   renderTabs()
   syncPreview()
+}
+
+// ---- ペイン（2 分割） --------------------------------------------------------
+
+const paneOf = (tab) => panes[tab.pane] || panes.a
+// そのタブが自分のペインで前面に出ているか（もう一方のペインの表示とは独立）
+const isVisibleTab = (tab) => paneOf(tab).activePath === tab.path
+const paneTabs = (id) => [...tabs.values()].filter((t) => t.pane === id)
+
+// フォーカスするペインを切り替える。activePath は「フォーカス中ペインのアクティブタブ」
+function focusPane(id, sync = true) {
+  if (!panes[id] || (id === 'b' && !splitOn)) return
+  const changed = focusedPane !== id
+  focusedPane = id
+  activePath = panes[id].activePath
+  for (const p of Object.values(panes)) p.el.classList.toggle('focused', p.id === focusedPane)
+  if (sync && changed) {
+    renderTabs()
+    syncPreview()
+    const t = tabs.get(activePath)
+    if (t) renderOutline(t)
+  }
+}
+
+// 分割の開始 / 解除。解除時は右ペインのタブを左へ引き取る
+function setSplit(on) {
+  if (on === splitOn) return
+  splitOn = on
+  panes.b.el.hidden = !on
+  $splitPane.hidden = !on
+  $panes.classList.toggle('split', on)
+  $btnSplit.classList.toggle('on', on)
+  $btnSplit.title = on ? '分割を解除' : '画面を分割'
+  if (on) {
+    focusPane('b')
+  } else {
+    for (const t of paneTabs('b')) {
+      t.pane = 'a'
+      panes.a.$view.appendChild(t.iframe)
+    }
+    if (!panes.a.activePath) panes.a.activePath = panes.b.activePath
+    panes.b.activePath = null
+    panes.b.previewPath = null
+    focusPane('a')
+  }
+  renderTabs()
+  syncPreview()
+}
+
+// タブをもう一方のペインへ移す
+function moveTabToPane(path, to) {
+  const t = tabs.get(path)
+  if (!t || t.pane === to) return
+  if (to === 'b' && !splitOn) setSplit(true)
+  const from = paneOf(t)
+  if (from.activePath === path) from.activePath = (paneTabs(from.id).find((x) => x.path !== path) || {}).path || null
+  if (from.previewPath === path) from.previewPath = null
+  t.pane = to
+  panes[to].$view.appendChild(t.iframe)
+  panes[to].activePath = path
+  focusPane(to, false)
+  if (!paneTabs('b').length && splitOn) setSplit(false) // 右が空になったら分割を解除
+  // 移動先が既にフォーカス中でも表示を更新する（focusPane は変化が無いと何もしない）
+  renderTabs()
+  syncPreview()
+  const moved = tabs.get(path)
+  if (moved) renderOutline(moved)
 }
 
 function activateTab(path) {
-  activePath = path
+  const t = tabs.get(path)
+  if (!t) return
+  paneOf(t).activePath = path
+  focusPane(t.pane, false)
   renderTabs()
   syncPreview()
-  const t = tabs.get(path)
-  if (t) renderOutline(t) // 「表示」セレクトの同期は syncPreview() が担当
+  renderOutline(t) // 「表示」セレクトの同期は syncPreview() が担当
 }
 
 function syncPreview() {
-  $empty.style.display = tabs.size ? 'none' : 'flex'
-  for (const [p, t] of tabs) t.iframe.classList.toggle('hidden', p !== activePath)
+  for (const p of Object.values(panes)) p.$empty.style.display = paneTabs(p.id).length ? 'none' : 'flex'
+  for (const [p, t] of tabs) t.iframe.classList.toggle('hidden', paneOf(t).activePath !== p)
   document.querySelectorAll('.file-label').forEach((el) =>
     el.classList.toggle('active', el.dataset.path === activePath)
   )
@@ -2333,7 +2482,8 @@ function syncPreview() {
   $btnForward.disabled = !at || !at.history || (at.historyIndex || 0) >= at.history.length - 1
   updateZoomUI() // ズーム UI をアクティブタブの現在モードに同期
   updateFileInfo() // フッターのファイル情報をアクティブタブに同期
-  if (!tabs.size) $outline.innerHTML = '<div class="tree-hint">見出しがありません。</div>'
+  // フォーカス中ペインにタブが無ければ見出しは空にする（他ペインの内容を残さない）
+  if (!at) $outline.innerHTML = '<div class="tree-hint">見出しがありません。</div>'
 }
 
 // バイト数を読みやすい単位に
@@ -2403,10 +2553,13 @@ function tabDisplayLabel(path) {
 }
 
 function renderTabs() {
-  $tabs.innerHTML = ''
+  for (const p of Object.values(panes)) p.$tabs.innerHTML = ''
   for (const [path, t] of tabs) {
+    const pane = paneOf(t)
     const tab = document.createElement('div')
-    tab.className = 'tab' + (path === activePath ? ' active' : '') + (t.preview ? ' preview' : '')
+    tab.className = 'tab' + (pane.activePath === path ? ' active' : '') + (t.preview ? ' preview' : '')
+    tab.draggable = true // ペイン間の移動
+    tab.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/mdp-tab', path))
     // 中クリックで閉じる
     tab.addEventListener('mousedown', (e) => {
       if (e.button === 1) {
@@ -2433,7 +2586,7 @@ function renderTabs() {
     })
     tab.appendChild(title)
     tab.appendChild(close)
-    $tabs.appendChild(tab)
+    pane.$tabs.appendChild(tab)
   }
 }
 
@@ -2442,7 +2595,7 @@ function pinTabByPath(path) {
   const t = tabs.get(path)
   if (!t) return
   t.preview = false
-  if (previewPath === path) previewPath = null
+  for (const p of Object.values(panes)) if (p.previewPath === path) p.previewPath = null
   setChecked(path, true)
   renderTabs()
 }
@@ -2701,6 +2854,20 @@ function setupSplitters() {
     () => setRightHidden($sidebarRight.style.display !== 'none')
   )
   document.getElementById('split-right').addEventListener('pointerdown', () => (baseRW = $sidebarRight.offsetWidth))
+
+  // 2 分割ペインの境界（左ペインの幅を変える）
+  let basePW = 0
+  makeDrag(
+    $splitPane,
+    (d) => {
+      const total = $panes.clientWidth
+      const w = Math.max(160, Math.min(total - 160, basePW + d))
+      panes.a.el.style.flex = `0 0 ${w}px`
+    },
+    () => {},
+    'x'
+  )
+  $splitPane.addEventListener('pointerdown', () => (basePW = panes.a.el.offsetWidth))
 }
 
 // ---- イベント ---------------------------------------------------------------
@@ -2733,15 +2900,52 @@ if (HOSTED) {
 $openBtn.addEventListener('click', openFolder)
 $openPathBtn.addEventListener('click', openPathDialog)
 // タブ一覧: 縦ホイールでも横スクロールできるようにする（スクロールバーは CSS で非表示）
-$tabs.addEventListener(
-  'wheel',
-  (e) => {
-    if (!$tabs.scrollWidth || $tabs.scrollWidth <= $tabs.clientWidth) return
+for (const pane of Object.values(panes)) {
+  pane.$tabs.addEventListener(
+    'wheel',
+    (e) => {
+      const el = pane.$tabs
+      if (!el.scrollWidth || el.scrollWidth <= el.clientWidth) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY !== 0 ? e.deltaY : e.deltaX
+    },
+    { passive: false }
+  )
+  // ペイン内のどこかを押したらそのペインをフォーカス（フッター/見出しの対象が変わる）
+  pane.el.addEventListener('mousedown', () => focusPane(pane.id))
+  pane.el.addEventListener('wheel', () => focusPane(pane.id), { passive: true })
+  // タブのドラッグ＆ドロップでペイン間を移動
+  // 未分割のときは、右寄りにドロップすると「分割して右へ移す」
+  const toRightHalf = (e) =>
+    !splitOn && pane.id === 'a' && e.clientX > pane.$view.getBoundingClientRect().left + pane.$view.clientWidth * 0.6
+  const allow = (e) => {
+    if (!e.dataTransfer.types.includes('text/mdp-tab')) return
     e.preventDefault()
-    $tabs.scrollLeft += e.deltaY !== 0 ? e.deltaY : e.deltaX
-  },
-  { passive: false }
-)
+    e.dataTransfer.dropEffect = 'move'
+    pane.$view.classList.toggle('drop-right', toRightHalf(e))
+  }
+  const leave = () => pane.$view.classList.remove('drop-right')
+  const drop = (e) => {
+    const path = e.dataTransfer.getData('text/mdp-tab')
+    if (!path) return
+    e.preventDefault()
+    const right = toRightHalf(e)
+    leave()
+    if (!tabs.has(path)) return
+    if (right) moveTabToPane(path, 'b') // 分割は moveTabToPane 側で開く
+    else if (tabs.get(path).pane !== pane.id) moveTabToPane(path, pane.id)
+    else activateTab(path)
+  }
+  pane.$tabs.addEventListener('dragover', allow)
+  pane.$tabs.addEventListener('drop', drop)
+  pane.$tabs.addEventListener('dragleave', leave)
+  pane.$view.addEventListener('dragover', allow)
+  pane.$view.addEventListener('drop', drop)
+  pane.$view.addEventListener('dragleave', leave)
+  pane.$view.addEventListener('dragend', leave)
+}
+$btnSplit.innerHTML = ICONS.split
+$btnSplit.addEventListener('click', () => setSplit(!splitOn))
 // 開閉はスプリッタのドラッグ判定（makeDrag の onToggle）で処理する
 // 「表示」変更はアクティブなタブにのみ適用・保持する
 $view.addEventListener('change', () => {
@@ -2759,6 +2963,13 @@ document.addEventListener('keydown', onPanKeyDown)
 document.addEventListener('keyup', onPanKeyUp)
 // フォーカスを失うと keyup を取り逃すため、押しっぱなし状態を解除する
 window.addEventListener('blur', () => {
+  // PDF のようにこちらから購読できない iframe でも、フォーカスが移ったら
+  // そのペインをメインにする（activeElement が該当 iframe になる）
+  const el = document.activeElement
+  if (el && el.tagName === 'IFRAME') {
+    const t = [...tabs.values()].find((x) => x.iframe === el)
+    if (t) focusPane(t.pane)
+  }
   if (!spaceDown) return
   spaceDown = false
   updatePanCursor()
@@ -2779,3 +2990,4 @@ $btnForward.addEventListener('click', () => navigateHistory(1))
 
 restoreLayout()
 setupSplitters()
+focusPane("a", false) // 初期のフォーカスペイン

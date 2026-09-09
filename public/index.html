@@ -36,15 +36,27 @@
               <button id="btn-forward" class="tbtn" title="進む" disabled></button>
               <button id="btn-reload" class="tbtn" title="再読み込み（レンダリング失敗・更新未反映時に）"></button>
               <button id="open-path" class="tbtn" disabled title="ファイルを選択"></button>
-              <div id="tabs"></div>
+              <div class="spacer"></div>
+              <button id="btn-split" class="tbtn" title="画面を分割"></button>
               <button id="btn-menu" class="tbtn" title="メニュー"></button>
             </div>
-            <div id="preview">
-              <div id="empty">.md, .html, .pdf を選択してください。</div>
-              <div id="loading" class="loading" hidden>
-                <span class="spin"></span>
-                <span>取得中</span>
-              </div>
+            <!-- 2 分割のペイン。各ペインが自分のタブバーと表示領域を持つ -->
+            <div id="panes">
+              <section class="pane" data-pane="a">
+                <div class="pane-tabs"></div>
+                <div class="pane-view">
+                  <div class="empty">.md, .html, .pdf を選択してください。</div>
+                  <div class="loading" hidden><span class="spin"></span><span>取得中</span></div>
+                </div>
+              </section>
+              <div class="splitter" id="split-pane" title="ドラッグで幅変更" hidden></div>
+              <section class="pane" data-pane="b" hidden>
+                <div class="pane-tabs"></div>
+                <div class="pane-view">
+                  <div class="empty">ここに表示するファイルを選んでください。</div>
+                  <div class="loading" hidden><span class="spin"></span><span>取得中</span></div>
+                </div>
+              </section>
             </div>
           </div>
           <div class="splitter" id="split-right" title="ドラッグで幅変更"><button class="split-handle" id="collapse-right" title="見出しを非表示">›</button></div>
