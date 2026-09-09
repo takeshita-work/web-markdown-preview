@@ -13,6 +13,7 @@
       <!-- 左サイドバー -->
       <aside id="sidebar">
         <div class="open-bar">
+          <button id="collapse-left" class="side-toggle" title="サイドバーを閉じる"></button>
           <span id="root-name" class="root-name">-</span>
           <button id="open-folder" title="フォルダを選択"></button>
         </div>
@@ -24,7 +25,7 @@
         </div>
       </aside>
 
-      <div class="splitter" id="split-left" title="ドラッグで幅変更"><button class="split-handle" id="collapse-left" title="フォルダを非表示">‹</button></div>
+      <div class="splitter" id="split-left" title="ドラッグで幅変更"></div>
 
       <!-- センター（ヘッダー=タブのみ + 下にコンテンツと右サイドバー） -->
       <main id="main">
@@ -32,12 +33,26 @@
           <!-- ヘッダー（タブ行）はメインコンテンツの幅までとし、右サイドバーの上には広げない -->
           <div id="preview-col">
             <div id="toolbar">
+              <!-- 履歴・更新 -->
               <button id="btn-back" class="tbtn" title="戻る" disabled></button>
               <button id="btn-forward" class="tbtn" title="進む" disabled></button>
-              <button id="btn-reload" class="tbtn" title="再読み込み（レンダリング失敗・更新未反映時に）"></button>
-              <button id="open-path" class="tbtn" disabled title="ファイルを選択"></button>
-              <div class="spacer"></div>
+              <button id="btn-reload" class="tbtn" title="再読み込み（レンダリング失敗・更新未反映時に）" disabled></button>
+              <span class="tb-sep"></span>
+              <!-- 文書の操作 -->
+              <button id="btn-source" class="tbtn" title="ソース表示の切替" disabled>&lt;/&gt;</button>
+              <button id="btn-print" class="tbtn" title="コンテンツを印刷 / PDF 出力" disabled></button>
+              <span class="tb-sep"></span>
+              <!-- 表示・レイアウト -->
+              <div class="zoom-group">
+                <button id="zoom-out" title="縮小 (Ctrl+Shift+-)">−</button>
+                <select id="zoom-select" title="拡大率 (Ctrl+Shift+0 でリセット)"></select>
+                <button id="zoom-in" title="拡大 (Ctrl+Shift++)">＋</button>
+              </div>
               <button id="btn-split" class="tbtn" title="画面を分割"></button>
+              <div class="spacer"></div>
+              <!-- スタイル -->
+              <select id="view" title="表示" disabled></select>
+              <span class="tb-sep"></span>
               <button id="btn-menu" class="tbtn" title="メニュー"></button>
             </div>
             <!-- 2 分割のペイン。各ペインが自分のタブバーと表示領域を持つ -->
@@ -45,7 +60,7 @@
               <section class="pane" data-pane="a">
                 <div class="pane-tabs"></div>
                 <div class="pane-view">
-                  <div class="empty">.md, .html, .pdf を選択してください。</div>
+                  <div class="empty">ファイルを選択してください</div>
                   <div class="loading" hidden><span class="spin"></span><span>取得中</span></div>
                 </div>
               </section>
@@ -53,16 +68,18 @@
               <section class="pane" data-pane="b" hidden>
                 <div class="pane-tabs"></div>
                 <div class="pane-view">
-                  <div class="empty">ここに表示するファイルを選んでください。</div>
+                  <div class="empty">ファイルを選択してください</div>
                   <div class="loading" hidden><span class="spin"></span><span>取得中</span></div>
                 </div>
               </section>
             </div>
           </div>
-          <div class="splitter" id="split-right" title="ドラッグで幅変更"><button class="split-handle" id="collapse-right" title="見出しを非表示">›</button></div>
+          <div class="splitter" id="split-right" title="ドラッグで幅変更"></div>
           <!-- 右サイドバー: 見出し -->
           <aside id="sidebar-right">
-            <div class="pane-spacer"></div>
+            <div class="pane-spacer">
+              <button id="collapse-right" class="side-toggle" title="サイドバーを閉じる"></button>
+            </div>
             <div id="outline">
               <div class="tree-hint">見出しがありません。</div>
             </div>
@@ -71,18 +88,7 @@
       </main>
       </div>
 
-      <!-- フッター: 各種コントロール -->
-      <div id="footer">
-        <div id="file-info" class="file-info" title=""></div>
-        <button id="btn-print" class="tbtn" title="コンテンツを印刷 / PDF 出力"></button>
-        <button id="btn-source" class="tbtn" title="ソース表示の切替">&lt;/&gt;</button>
-        <div class="zoom-group">
-          <button id="zoom-out" title="縮小 (Ctrl+Shift+-)">−</button>
-          <select id="zoom-select" title="拡大率 (Ctrl+Shift+0 でリセット)"></select>
-          <button id="zoom-in" title="拡大 (Ctrl+Shift++)">＋</button>
-        </div>
-        <select id="view" title="表示"></select>
-        <button id="btn-cssdir" class="tbtn" disabled title="CSS の検索フォルダ"></button>
+
       </div>
     </div>
     <script type="module" src="bundle.js"></script>

@@ -55,10 +55,24 @@ export async function startServer({ port = null, watch = false } = {}) {
   }
 
   if (watch) {
-    const ctx = await esbuild.context(buildOptions)
+    let ctx = await esbuild.context(buildOptions)
     await ctx.rebuild()
     await ctx.watch()
     console.log('  [esbuild] watch mode: src/client を監視中')
+    // package.json の version は define でバンドルに焼き込むため、起動時の値のまま
+    // 固定されてしまう。開発中にバージョンを上げたら作り直して埋め込み直す。
+    let embedded = readVersion()
+    fs.watchFile(PKG_FILE, { interval: 1000 }, async () => {
+      const v = readVersion()
+      if (v === embedded) return
+      embedded = v
+      await ctx.dispose()
+      buildOptions.define.__APP_VERSION__ = JSON.stringify(v)
+      ctx = await esbuild.context(buildOptions)
+      await ctx.rebuild()
+      await ctx.watch()
+      console.log(`  [esbuild] version ${v} で再ビルドしました`)
+    })
   } else {
     await esbuild.build(buildOptions)
   }

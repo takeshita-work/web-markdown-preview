@@ -70,6 +70,8 @@ let styleList = [] // [{ path, css }]
 let defaultStdCss = '' // 既定 CSS のテキスト
 let defaultStdPath = '' // 既定 CSS のパス
 let lastTreeSig = '' // 直近に描画したツリー構成のシグネチャ（差分検知でちらつき防止）
+let lastTree = null // 直近に構築したツリー（非表示の切り替えで再描画するために保持）
+const hiddenPaths = new Set() // 一時的に非表示にしたファイル / フォルダ（表示だけの絞り込み）
 let refreshingTree = false // ツリー再走査の多重実行ガード
 // ファイル（+ ソース/レンダリング表示）ごとのスクロール位置。タブの再作成後も復元できるよう
 // tab オブジェクトではなくパス単位で保持する。
@@ -92,6 +94,7 @@ const isHtmlPath = (p) => /\.html?$/i.test(p)
 
 const $tree = document.getElementById('tree')
 const $outline = document.getElementById('outline')
+const $toolbar = document.getElementById('toolbar')
 const $panes = document.getElementById('panes')
 const $splitPane = document.getElementById('split-pane')
 const $btnSplit = document.getElementById('btn-split')
@@ -111,13 +114,15 @@ for (const el of document.querySelectorAll('.pane')) {
   }
 }
 let focusedPane = 'a' // フッター・見出し・ズームが対象にするペイン
+// ツリーから新しいファイルを開く先。ユーザーが自分でペインを選んだときだけ更新し、
+// 「別ペインで開いているファイルを選んだ」ことによるフォーカス移動では変えない。
+// これにより、次にファイルを選ぶと元の作業ペインへ戻る。
+let treeTargetPane = 'a'
 let splitOn = false
 
 const $view = document.getElementById('view')
-const $btnCssDir = document.getElementById('btn-cssdir')
 const $openBtn = document.getElementById('open-folder')
 const $rootName = document.getElementById('root-name')
-const $openPathBtn = document.getElementById('open-path')
 const $zoomSelect = document.getElementById('zoom-select')
 const $zoomIn = document.getElementById('zoom-in')
 const $zoomOut = document.getElementById('zoom-out')
@@ -133,7 +138,6 @@ const $btnReload = document.getElementById('btn-reload')
 const $btnBack = document.getElementById('btn-back')
 const $btnForward = document.getElementById('btn-forward')
 const $btnMenu = document.getElementById('btn-menu')
-const $fileInfo = document.getElementById('file-info')
 
 
 // 既定（ファイル未選択時）のタブタイトル。index.html の <title> を初期値に使う
@@ -184,6 +188,10 @@ const ICONS = {
   forward: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 12 8l-5.5 4.5"/><path d="M11.7 8H3.5"/></svg>`,
   // 電源（終了）
   power: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.4a5 5 0 1 0 6.6 0"/></svg>`,
+  // サイドバー（枠＋区切り線）。開いている間は面を塗り、閉じている間は枠だけにする。
+  // 右サイドバー用は CSS の scaleX(-1) で反転させて使う
+  sidebarOn: `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M3 3h3v10H3a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 3 3z" fill="currentColor" stroke="none"/><path d="M6 3v10"/></svg>`,
+  sidebarOff: `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M6 3v10"/></svg>`,
   // 画面分割（縦線で 2 分割した枠）
   split: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M8 3v10"/></svg>`,
   // コピー（クリップボード）
@@ -210,7 +218,6 @@ async function openFolder() {
 
 async function loadRoot() {
   $rootName.textContent = rootHandle.name
-  $openPathBtn.disabled = false // フォルダ選択後は相対パス指定を有効化
   for (const p of [...tabs.keys()]) closeTab(p)
   // ディレクトリ走査中はツリー領域に取得中インジケータを表示（renderTree で置き換わる）
   $tree.innerHTML = '<div class="tree-loading"><span class="spin"></span><span>取得中</span></div>'
@@ -218,6 +225,8 @@ async function loadRoot() {
   const tree = await buildTree(rootHandle, rootHandle.name, '', newMap)
   swapFileMap(newMap)
   lastTreeSig = treeSignature(tree)
+  hiddenPaths.clear() // 別のフォルダを開いたら一時非表示は解除
+  lastTree = tree
   renderTree(tree) // 初期はすべて折りたたみ
   loadFolderSettings() // このフォルダに保存された設定（CSS の検索フォルダ）を復元
   await classifyCss()
@@ -258,6 +267,7 @@ async function refreshTree() {
     const sig = treeSignature(tree)
     if (sig === lastTreeSig) return // 構成に変化なし（fileMap のハンドルだけ新しくして終了）
     lastTreeSig = sig
+    lastTree = tree
     const expanded = getExpandedDirPaths()
     const scrollTop = $tree.scrollTop
     renderTree(tree, expanded)
@@ -299,48 +309,6 @@ function openByPath(raw) {
   pinFile({ type: 'file', name: resolved.split('/').pop(), path: resolved, handle: h })
 }
 
-// 相対パス入力用のモーダルダイアログを開く
-function openPathDialog() {
-  if (!rootHandle) return
-  const overlay = document.createElement('div')
-  overlay.className = 'modal-overlay'
-  const box = document.createElement('div')
-  box.className = 'modal-box'
-  const title = document.createElement('div')
-  title.className = 'modal-title'
-  title.textContent = 'ファイルを選択（相対パスで指定）'
-  const input = document.createElement('input')
-  input.type = 'text'
-  input.className = 'modal-input'
-  const btns = document.createElement('div')
-  btns.className = 'modal-btns'
-  const cancel = document.createElement('button')
-  cancel.className = 'tbtn'
-  cancel.textContent = 'キャンセル'
-  const ok = document.createElement('button')
-  ok.className = 'tbtn'
-  ok.textContent = '開く'
-  btns.append(cancel, ok)
-  box.append(title, input, btns)
-  overlay.append(box)
-  document.body.append(overlay)
-  const close = () => overlay.remove()
-  const submit = () => {
-    const v = input.value
-    close()
-    openByPath(v)
-  }
-  ok.addEventListener('click', submit)
-  cancel.addEventListener('click', close)
-  overlay.addEventListener('mousedown', (e) => {
-    if (e.target === overlay) close()
-  })
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit()
-    else if (e.key === 'Escape') close()
-  })
-  input.focus()
-}
 
 // map には fileMap を直接渡さず、呼び出し側で完成後にまとめて差し替える
 // （walk 中は非同期の間隙があり、fileMap を直接クリアすると解決処理と競合するため）。
@@ -392,14 +360,6 @@ function loadFolderSettings() {
   const s = (rootHandle && readFolderSettings()[rootHandle.name]) || {}
   // cssDir（単一・旧形式）で保存されたものは cssDirs（複数）へ移行する
   cssDirs = Array.isArray(s.cssDirs) ? s.cssDirs.filter((d) => typeof d === 'string' && d) : s.cssDir ? [s.cssDir] : []
-  updateCssDirUI()
-}
-
-// フッターのボタンを現在の指定に同期（限定中は on 表示、tooltip に指定先）
-function updateCssDirUI() {
-  $btnCssDir.disabled = !rootHandle
-  $btnCssDir.classList.toggle('on', cssDirs.length > 0)
-  $btnCssDir.title = `CSS の検索フォルダ: ${cssDirs.length ? cssDirs.join(' / ') : 'ルート以下すべて'}`
 }
 
 function saveFolderSettings(patch) {
@@ -464,7 +424,6 @@ function compressCssDirNode(child) {
 async function setCssDirs(dirs) {
   cssDirs = dirs
   saveFolderSettings({ cssDirs: dirs, cssDir: undefined }) // 旧形式のキーは残さない
-  updateCssDirUI()
   await classifyCss()
   // 候補から外れた CSS を選んでいたタブは既定へ戻す
   for (const t of tabs.values()) {
@@ -616,6 +575,31 @@ function revealInTree(path) {
   label.scrollIntoView({ block: 'nearest' })
 }
 
+// 非表示の状態だけを変えてツリーを描き直す（展開状態・スクロール位置は保つ）
+function rerenderTree() {
+  if (!lastTree) return
+  const expanded = getExpandedDirPaths()
+  const scrollTop = $tree.scrollTop
+  renderTree(lastTree, expanded)
+  $tree.scrollTop = scrollTop
+  if (activePath) {
+    document.querySelectorAll('.file-label').forEach((el) => el.classList.toggle('active', el.dataset.path === activePath))
+  }
+}
+
+// 一時的に非表示にする / すべて戻す（表示だけの操作で、タブや CSS の検索には影響しない）
+function hidePath(path) {
+  hiddenPaths.add(path)
+  rerenderTree()
+  toast('非表示にしました（何もない所で右クリック →「非表示にしたものを表示する」で戻せます）')
+}
+function unhideAll() {
+  const n = hiddenPaths.size
+  hiddenPaths.clear()
+  rerenderTree()
+  toast(n ? `非表示にした ${n} 件を表示しました` : '非表示にしたものはありません')
+}
+
 function renderTree(tree, expanded = null) {
   $tree.innerHTML = ''
   for (const child of tree.children) {
@@ -631,6 +615,7 @@ function renderTree(tree, expanded = null) {
 
 // expanded: 再描画時に展開状態を引き継ぐためのパス集合（null なら全て折りたたみ）
 function renderNode(node, expanded = null) {
+  if (hiddenPaths.has(node.path)) return null // 一時的に非表示（フォルダなら配下ごと）
   if (node.type === 'file') {
     if (!PREVIEWABLE.test(node.name)) return null
     const div = document.createElement('div')
@@ -655,7 +640,7 @@ function renderNode(node, expanded = null) {
       e.preventDefault()
       pinFile(node)
     })
-    label.addEventListener('contextmenu', (e) => pathMenu(e, node.path))
+    label.addEventListener('contextmenu', (e) => pathMenu(e, node.path, true))
     div.appendChild(label)
     return div
   }
@@ -677,7 +662,7 @@ function renderNode(node, expanded = null) {
       refreshTree() // 展開時に最新のディレクトリ内容へ更新
     }
   })
-  label.addEventListener('contextmenu', (e) => pathMenu(e, node.path)) // フォルダの相対パスをコピー
+  label.addEventListener('contextmenu', (e) => pathMenu(e, node.path, true)) // フォルダの相対パス / 非表示
   const children = document.createElement('div')
   children.className = 'children'
   for (const c of node.children) {
@@ -906,7 +891,7 @@ async function buildDocument(tab, src) {
       })
       .join('\n')
     return `<!doctype html><html><head><meta charset="utf-8">
-<style>${SCROLLBAR_CSS}body{margin:0;} pre{margin:0;padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
+<style>${SCROLLBAR_CSS}html,body{background:#fff;} body{margin:0;} pre{margin:0;padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
 @media print{ html{height:auto !important;} body{transform:none !important; width:auto !important; min-height:0 !important;} }</style>
 </head><body><pre>${body}</pre></body></html>`
   }
@@ -1086,7 +1071,6 @@ async function renderTab(tab, autoScroll) {
       if (tab.path === activePath) syncPreview() // セレクトを初期 view に同期
       // srcdoc 反映後の処理は iframe の load イベント（onIframeLoad）で行う
     }
-    if (tab.path === activePath) updateFileInfo() // ライブリロード時もフッター情報を更新
   } catch (e) {
     tab.iframe.removeAttribute('src')
     if (e && e.name === 'NotAllowedError') {
@@ -1451,7 +1435,7 @@ function openCssDirDialog() {
   box.className = 'modal-box'
   const title = document.createElement('div')
   title.className = 'modal-title'
-  title.textContent = 'CSS の検索フォルダ'
+  title.textContent = 'CSS の設定'
 
   const bar = document.createElement('div')
   bar.className = 'dirpick-bar'
@@ -1468,11 +1452,6 @@ function openCssDirDialog() {
   const chips = document.createElement('div')
   chips.className = 'dirpick-chips'
 
-  const note = document.createElement('div')
-  note.className = 'modal-note'
-  note.textContent =
-    'チェックしたフォルダ以下の .css だけを「表示」の候補にします（marp テーマも同じ）。複数選択でき、何も選ばなければルート以下すべてが対象です。`▸` で下の階層を開閉します。設定はブラウザに保存され、開いたフォルダごとに別々に記憶します。'
-
   const btns = document.createElement('div')
   btns.className = 'modal-btns'
   const cancel = document.createElement('button')
@@ -1483,7 +1462,7 @@ function openCssDirDialog() {
   save.textContent = '決定'
   btns.append(cancel, save)
 
-  box.append(title, bar, list, chips, note, btns)
+  box.append(title, bar, list, chips, btns)
   overlay.append(box)
   document.body.append(overlay)
   const close = () => overlay.remove()
@@ -1615,7 +1594,7 @@ async function openSettings() {
   box.className = 'modal-box'
   const title = document.createElement('div')
   title.className = 'modal-title'
-  title.textContent = '設定'
+  title.textContent = 'アプリ設定'
 
   const info = document.createElement('div')
   info.className = 'modal-note'
@@ -1715,11 +1694,13 @@ async function openSettings() {
 // ヘッダー右端のハンバーガーから開くドロップダウン（設定 / 終了）
 function openMenu(anchor) {
   const rect = anchor.getBoundingClientRect()
-  const items = []
+  const items = [
+    { label: 'CSS の設定', icon: ICONS.folder, action: openCssDirDialog },
+  ]
   if (!HOSTED) {
     // ローカルサーバがあるときだけ意味のある項目（/__config・/__shutdown を叩く）
-    items.push({ label: '設定', icon: ICONS.gear, action: openSettings })
-    items.push({ label: 'アプリを終了', icon: ICONS.power, action: () => confirmDialog('アプリを終了しますか？', '終了', quitApp) })
+    items.push({ label: 'アプリ設定', icon: ICONS.gear, action: openSettings })
+    items.push({ label: '終了', icon: ICONS.power, action: () => confirmDialog('アプリを終了しますか？', '終了', quitApp) })
   }
   items.push({ label: `version ${APP_VERSION}`, static: true })
   showCtx(rect.left, rect.bottom + 4, items)
@@ -1753,6 +1734,13 @@ const hideCtx = () => (ctxEl.style.display = 'none')
 function showCtx(x, y, items) {
   ctxEl.innerHTML = ''
   for (const it of items) {
+    if (it.sep) {
+      // グループの区切り線
+      const sp = document.createElement('div')
+      sp.className = 'mi-sep'
+      ctxEl.appendChild(sp)
+      continue
+    }
     const mi = document.createElement('div')
     mi.className = 'mi'
     if (it.icon) {
@@ -1769,6 +1757,8 @@ function showCtx(x, y, items) {
     if (it.static) {
       // バージョン表示など、クリックしない情報行
       mi.className = 'mi mi-static'
+    } else if (it.disabled) {
+      mi.className = 'mi mi-disabled' // 実行できない項目（履歴が無いときの戻る/進む）
     } else {
       mi.addEventListener('click', () => {
         hideCtx()
@@ -1795,41 +1785,106 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault()
 })
 
+// もう一方のペインへ（開いていれば移動、開いていなければそのペインで開く）
+function openInOtherPane(path) {
+  const t = tabs.get(path)
+  const to = t ? (t.pane === 'a' ? 'b' : 'a') : focusedPane === 'a' ? 'b' : 'a'
+  if (t) return moveTabToPane(path, to)
+  const handle = fileMap.get(path)
+  if (!handle) return
+  if (to === 'b' && !splitOn) setSplit(true)
+  focusPane(to)
+  pinFile({ name: path.split('/').pop(), path, handle })
+}
+
+// 「もう一方のペインへ」の項目。開いているタブなら移動、未オープンなら開く
+function otherPaneItem(path) {
+  const t = tabs.get(path)
+  const to = t ? (t.pane === 'a' ? 'b' : 'a') : focusedPane === 'a' ? 'b' : 'a'
+  const right = to === 'b'
+  return {
+    label: t
+      ? right ? '右のペインへ移動（分割）' : '左のペインへ移動'
+      : right ? '右のペインで開く（分割）' : '左のペインで開く',
+    icon: ICONS.split,
+    action: () => openInOtherPane(path),
+  }
+}
+
+// 開いているタブをまとめて閉じる
+function closeOtherTabs(path) {
+  for (const p of [...tabs.keys()]) if (p !== path) closeTab(p)
+}
+function closeAllTabs() {
+  for (const p of [...tabs.keys()]) closeTab(p)
+}
+
+// パス系のコピー項目（各メニューで共用）
 function copyPathItems(path) {
   const name = path.split('/').pop()
-  const t = tabs.get(path)
-  const items = []
-  if (t) {
-    // 開いているタブなら、もう一方のペインへ移せる
-    const to = t.pane === 'a' ? 'b' : 'a'
-    items.push({
-      label: to === 'b' ? '右のペインへ移動（分割）' : '左のペインへ移動',
-      icon: ICONS.split,
-      action: () => moveTabToPane(path, to),
-    })
-  }
-  return items.concat([
+  return ([
     { label: '相対パスをコピー', action: () => copyText(path).then((ok) => toast(ok ? 'パスをコピーしました' : 'コピーに失敗しました')) },
     { label: 'ファイル名をコピー', action: () => copyText(name).then((ok) => toast(ok ? 'ファイル名をコピーしました' : 'コピーに失敗しました')) },
   ])
 }
 
-function pathMenu(e, path) {
+// ツリーの項目（inTree）とタブで共通の右クリックメニュー。
+// 「開く / ペイン」→「タブを閉じる」→「コピー」→「非表示」の順にグループ分けする
+function pathMenu(e, path, inTree) {
   e.preventDefault()
-  showCtx(e.clientX, e.clientY, copyPathItems(path))
+  const items = []
+  const isFile = fileMap.has(path)
+  if (inTree) {
+    if (isFile) {
+      items.push({
+        label: '開く',
+        icon: ICONS.file,
+        action: () => pinFile({ name: path.split('/').pop(), path, handle: fileMap.get(path) }),
+      })
+      items.push(otherPaneItem(path))
+      items.push({ sep: true })
+    }
+  } else {
+    // タブのメニュー
+    items.push(otherPaneItem(path), { sep: true })
+    items.push({ label: '閉じる', action: () => closeTab(path) })
+    if (tabs.size > 1) items.push({ label: '他のタブを閉じる', action: () => closeOtherTabs(path) })
+    items.push({ label: 'すべてのタブを閉じる', action: closeAllTabs })
+    items.push({ sep: true })
+  }
+  items.push(...copyPathItems(path))
+  if (inTree) {
+    items.push({ sep: true })
+    items.push({ label: '非表示にする', action: () => hidePath(path) })
+    items.push({ label: 'サイドバーを閉じる', icon: ICONS.sidebarOn, action: () => setLeftHidden(true) })
+  }
+  showCtx(e.clientX, e.clientY, items)
 }
 
 // メインコンテンツ（プレビュー）右クリックメニュー。img/video 上での右クリックなら該当要素を渡す
 function showContentMenu(x, y, tab, imgEl, videoEl) {
   const items = []
-  if (imgEl) {
-    items.push({ label: '画像をコピー', action: () => copyImageToClipboard(imgEl) })
-  }
+  // 右クリックした対象そのものへの操作を先頭に
+  if (imgEl) items.push({ label: '画像をコピー', icon: ICONS.copy, action: () => copyImageToClipboard(imgEl) })
   if (videoEl) {
     // 動画そのものは Clipboard API が対応する MIME 型に無いため、現在のフレームを画像としてコピーする
-    items.push({ label: '現在のフレームを画像コピー', action: () => copyVideoFrameToClipboard(videoEl) })
+    items.push({ label: '現在のフレームを画像コピー', icon: ICONS.copy, action: () => copyVideoFrameToClipboard(videoEl) })
   }
+  if (items.length) items.push({ sep: true })
+  const idx = tab.historyIndex || 0
+  const hist = tab.history || []
+  items.push({ label: '戻る', icon: ICONS.back, disabled: idx <= 0, action: () => navigateHistory(-1, tab) })
+  items.push({ label: '進む', icon: ICONS.forward, disabled: idx >= hist.length - 1, action: () => navigateHistory(1, tab) })
+  items.push({
+    label: '更新',
+    icon: ICONS.reload,
+    action: () => {
+      refreshTree() // フォルダ内容も最新化してから再描画
+      renderTab(tab)
+    },
+  })
   if (!isPdfPath(tab.path)) {
+    // 表示の切り替え
     items.push({
       label: tab.source ? 'レンダリング表示に切替' : 'ソース表示に切替',
       action: () => {
@@ -1839,11 +1894,16 @@ function showContentMenu(x, y, tab, imgEl, videoEl) {
         renderTab(tab)
       },
     })
-    items.push({ label: 'ソースをコピー（全体）', action: () => copyFullSource(tab) })
-    items.push({ label: 'ソースをコピー（選択範囲）', action: () => copySelectionSource(tab) })
   }
-  items.push({ label: '印刷 / PDF 出力', action: printActiveTab })
+  items.push(otherPaneItem(tab.path))
+  items.push({ sep: true })
+  if (!isPdfPath(tab.path)) {
+    items.push({ label: 'ソースをコピー（全体）', icon: ICONS.copy, action: () => copyFullSource(tab) })
+    items.push({ label: 'ソースをコピー（選択範囲）', icon: ICONS.copy, action: () => copySelectionSource(tab) })
+  }
   items.push(...copyPathItems(tab.path))
+  items.push({ sep: true })
+  items.push({ label: '印刷 / PDF 出力', icon: ICONS.printer, action: printActiveTab })
   showCtx(x, y, items)
 }
 
@@ -2271,7 +2331,11 @@ function openTab(node, preview) {
 
 // 仮選択: シングルクリック。既存の仮選択タブを置き換える
 function previewFile(node) {
-  if (tabs.has(node.path)) return activateTab(node.path) // 既に開いていれば（別ペインでも）そこへ切替
+  const opened = tabs.get(node.path)
+  // 既に開いているものは、そのペインで表示する（フォーカスも移る）。
+  // ただし「次に開く先」は変えないので、続けて別のファイルを選べば元のペインに戻る
+  if (opened) return activateTab(node.path, true)
+  if (focusedPane !== treeTargetPane) focusPane(treeTargetPane) // 元の作業ペインへ戻す
   const pane = panes[focusedPane]
   if (pane.previewPath && pane.previewPath !== node.path && tabs.has(pane.previewPath)) closeTab(pane.previewPath)
   pane.previewPath = node.path
@@ -2280,12 +2344,13 @@ function previewFile(node) {
 
 // 確定選択: ダブルクリック or チェックボックス。閉じられない（× で閉じる）
 function pinFile(node) {
-  if (!tabs.has(node.path)) {
+  const t = tabs.get(node.path)
+  if (!t) {
+    if (focusedPane !== treeTargetPane) focusPane(treeTargetPane) // 元の作業ペインへ戻す
     openTab(node, false)
   } else {
-    const t = tabs.get(node.path)
     t.preview = false
-    activateTab(node.path)
+    activateTab(node.path, true) // 開いているペインで表示（開く先は据え置き）
   }
   for (const p of Object.values(panes)) if (p.previewPath === node.path) p.previewPath = null
   setChecked(node.path, true)
@@ -2336,8 +2401,8 @@ function navigateTabTo(tab, node, pushHistory) {
 }
 
 // アクティブタブの履歴を dir 分移動（-1: 戻る, +1: 進む）
-function navigateHistory(dir) {
-  const t = tabs.get(activePath)
+function navigateHistory(dir, tab) {
+  const t = tab || tabs.get(activePath)
   if (!t || !t.history) return
   const idx = (t.historyIndex || 0) + dir
   if (idx < 0 || idx >= t.history.length) return
@@ -2391,10 +2456,11 @@ const isVisibleTab = (tab) => paneOf(tab).activePath === tab.path
 const paneTabs = (id) => [...tabs.values()].filter((t) => t.pane === id)
 
 // フォーカスするペインを切り替える。activePath は「フォーカス中ペインのアクティブタブ」
-function focusPane(id, sync = true) {
+function focusPane(id, sync = true, keepTarget = false) {
   if (!panes[id] || (id === 'b' && !splitOn)) return
   const changed = focusedPane !== id
   focusedPane = id
+  if (!keepTarget) treeTargetPane = id // 自分で選んだペイン＝以後の「開く先」
   activePath = panes[id].activePath
   for (const p of Object.values(panes)) p.el.classList.toggle('focused', p.id === focusedPane)
   if (sync && changed) {
@@ -2424,6 +2490,7 @@ function setSplit(on) {
     if (!panes.a.activePath) panes.a.activePath = panes.b.activePath
     panes.b.activePath = null
     panes.b.previewPath = null
+    treeTargetPane = 'a'
     focusPane('a')
   }
   renderTabs()
@@ -2431,7 +2498,7 @@ function setSplit(on) {
 }
 
 // タブをもう一方のペインへ移す
-function moveTabToPane(path, to) {
+function moveTabToPane(path, to, keepSplit) {
   const t = tabs.get(path)
   if (!t || t.pane === to) return
   const wasSplit = splitOn // 分割を開くための移動かどうか
@@ -2446,7 +2513,7 @@ function moveTabToPane(path, to) {
   // 移動元が空になったら分割を解除する（残った側へタブを引き取る）。
   // ただし「分割するための移動」で解除すると操作が無意味になるので、元から分割
   // していた場合だけ。タブを閉じてできた空ペインは残す（そこへ開けるようにするため）
-  if (wasSplit && splitOn && !paneTabs(from.id).length) setSplit(false)
+  if (wasSplit && splitOn && !keepSplit && !paneTabs(from.id).length) setSplit(false)
   // 移動先が既にフォーカス中でも表示を更新する（focusPane は変化が無いと何もしない）
   renderTabs()
   syncPreview()
@@ -2454,11 +2521,11 @@ function moveTabToPane(path, to) {
   if (moved) renderOutline(moved)
 }
 
-function activateTab(path) {
+function activateTab(path, keepTarget) {
   const t = tabs.get(path)
   if (!t) return
   paneOf(t).activePath = path
-  focusPane(t.pane, false)
+  focusPane(t.pane, false, keepTarget)
   renderTabs()
   syncPreview()
   renderOutline(t) // 「表示」セレクトの同期は syncPreview() が担当
@@ -2470,11 +2537,10 @@ function syncPreview() {
     p.$empty.style.display = has ? 'none' : 'flex'
     // 分割中の空ペインは「ここに開ける」ことが分かる文言にする
     if (!has) {
-      p.$empty.textContent = !splitOn
-        ? '.md, .html, .pdf を選択してください。'
-        : p.id === focusedPane
-          ? 'ファイルを選択すると、ここに表示します。'
-          : 'クリックしてから、ファイルを選択してください。'
+      p.$empty.textContent =
+        splitOn && p.id !== focusedPane
+          ? 'クリックしてから、ファイルを選択してください' // 分割中の非アクティブ側
+          : 'ファイルを選択してください'
     }
   }
   for (const [p, t] of tabs) t.iframe.classList.toggle('hidden', paneOf(t).activePath !== p)
@@ -2493,67 +2559,19 @@ function syncPreview() {
   // ソース/コピー系ボタンの状態
   const isMd = !!at && !isPdfPath(at.path)
   $btnSource.classList.toggle('on', !!(at && at.source))
-  $btnSource.disabled = !isMd
+  $btnSource.disabled = !isMd // PDF とタブ無しでは切り替えられない
   $btnBack.disabled = !at || !at.history || (at.historyIndex || 0) <= 0
   $btnForward.disabled = !at || !at.history || (at.historyIndex || 0) >= at.history.length - 1
+  // タブが無ければ「再読み込み」「印刷」「表示（CSS）」は効かないので無効にする
+  $btnReload.disabled = !at
+  $btnPrint.disabled = !at
+  $view.disabled = !at || !$view.options.length
   updateZoomUI() // ズーム UI をアクティブタブの現在モードに同期
-  updateFileInfo() // フッターのファイル情報をアクティブタブに同期
   // フォーカス中ペインにタブが無ければ見出しは空にする（他ペインの内容を残さない）
   if (!at) $outline.innerHTML = '<div class="tree-hint">見出しがありません。</div>'
 }
 
-// バイト数を読みやすい単位に
-function humanSize(bytes) {
-  if (bytes == null) return ''
-  if (bytes < 1024) return bytes + ' B'
-  const u = ['KB', 'MB', 'GB']
-  let n = bytes / 1024
-  let i = 0
-  while (n >= 1024 && i < u.length - 1) {
-    n /= 1024
-    i++
-  }
-  return (n >= 100 ? Math.round(n) : n.toFixed(1)) + ' ' + u[i]
-}
 
-// フッターのファイル情報（相対パス・行数・文字数・容量）を更新。
-// 項目はマージンで区切り、相対パスのコピーボタンを添える
-function updateFileInfo() {
-  const t = tabs.get(activePath)
-  $fileInfo.innerHTML = ''
-  if (!t) {
-    $fileInfo.title = ''
-    return
-  }
-  const shown = '/' + t.path // 先頭に「/」を付けて表示・コピー
-  // コピーボタン + パス（近接した1グループ）
-  const name = document.createElement('span')
-  name.className = 'fi-name'
-  const copy = document.createElement('button')
-  copy.className = 'fi-copy'
-  copy.title = 'パスをコピー'
-  copy.innerHTML = ICONS.copy
-  copy.addEventListener('click', () =>
-    copyText(shown).then((ok) => toast(ok ? 'パスをコピーしました' : 'コピーに失敗しました'))
-  )
-  const path = document.createElement('span')
-  path.className = 'fi-path'
-  path.textContent = shown
-  name.append(path, copy) // パスの右側にコピーボタン
-  $fileInfo.append(name)
-  // 行数 / 文字数 / 容量
-  const items = []
-  if (t.lineCount != null) items.push(`${t.lineCount.toLocaleString()} 行`)
-  if (t.charCount != null) items.push(`${t.charCount.toLocaleString()} 文字`)
-  if (t.size != null) items.push(humanSize(t.size))
-  for (const text of items) {
-    const s = document.createElement('span')
-    s.className = 'fi-item'
-    s.textContent = text
-    $fileInfo.append(s)
-  }
-  $fileInfo.title = [shown, ...items].join('   ')
-}
 
 // 同名ファイルが複数開かれているタブは親ディレクトリ名を付けて区別する。
 // 直上の1階層だけでも同名になる場合は、一意になるまでさらに上の階層を足していく。
@@ -2759,16 +2777,23 @@ setInterval(() => {
 function setLeftHidden(hidden) {
   $sidebar.style.display = hidden ? 'none' : '' // スプリッタはレールとして残す
   $splitLeft.classList.toggle('collapsed', hidden)
-  $collapseLeft.textContent = hidden ? '›' : '‹'
-  $collapseLeft.title = hidden ? 'フォルダを表示' : 'フォルダを非表示'
+  // 開いている間はサイドバー側のヘッダー、閉じている間はメイン（ツールバー）側へ置く
+  $collapseLeft.innerHTML = hidden ? ICONS.sidebarOff : ICONS.sidebarOn // 開いている間は面を塗る
+  $collapseLeft.title = hidden ? 'サイドバーを開く' : 'サイドバーを閉じる'
+  // ボタンは常にサイドバーの境界（分割線）側に置く
+  if (hidden) $toolbar.prepend($collapseLeft) // メイン左端＝隠れたサイドバーとの境界
+  else document.querySelector('.open-bar').append($collapseLeft) // サイドバーの右端＝境界側
   localStorage.setItem(LS.leftHidden, hidden ? '1' : '')
 }
 
 function setRightHidden(hidden) {
   $sidebarRight.style.display = hidden ? 'none' : ''
   $splitRight.classList.toggle('collapsed', hidden)
-  $collapseRight.textContent = hidden ? '‹' : '›'
-  $collapseRight.title = hidden ? '見出しを表示' : '見出しを非表示'
+  $collapseRight.innerHTML = hidden ? ICONS.sidebarOff : ICONS.sidebarOn
+  $collapseRight.style.transform = 'scaleX(-1)' // 右サイドバーなので左右反転
+  $collapseRight.title = hidden ? 'サイドバーを開く' : 'サイドバーを閉じる'
+  if (hidden) $toolbar.append($collapseRight) // メイン右端＝境界側
+  else document.querySelector('.pane-spacer').prepend($collapseRight) // 見出しペインの左端＝境界側
   localStorage.setItem(LS.rightHidden, hidden ? '1' : '')
 }
 
@@ -2852,8 +2877,7 @@ function setupSplitters() {
       $sidebar.style.width = w + 'px'
     },
     () => localStorage.setItem(LS.leftWidth, parseInt($sidebar.offsetWidth, 10)),
-    'x',
-    () => setLeftHidden($sidebar.style.display !== 'none')
+    'x'
   )
   document.getElementById('split-left').addEventListener('pointerdown', () => (baseW = $sidebar.offsetWidth))
 
@@ -2866,8 +2890,7 @@ function setupSplitters() {
       $sidebarRight.style.width = w + 'px'
     },
     () => localStorage.setItem(LS.rightWidth, parseInt($sidebarRight.offsetWidth, 10)),
-    'x',
-    () => setRightHidden($sidebarRight.style.display !== 'none')
+    'x'
   )
   document.getElementById('split-right').addEventListener('pointerdown', () => (baseRW = $sidebarRight.offsetWidth))
 
@@ -2890,31 +2913,44 @@ function setupSplitters() {
 
 // ボタンのアイコンを SVG で設定（ICONS を単一の定義元にする）
 $openBtn.innerHTML = ICONS.folder
-$openPathBtn.innerHTML = ICONS.file
 $btnPrint.innerHTML = ICONS.printer
 $btnReload.innerHTML = ICONS.reload
 $btnBack.innerHTML = ICONS.back
 $btnForward.innerHTML = ICONS.forward
-$btnCssDir.innerHTML = ICONS.folder
-$btnCssDir.addEventListener('click', openCssDirDialog)
+// 公開版は ☰ の代わりにバージョンを出す（クリックでメニューが開くのは共通）
 if (HOSTED) {
-  // 公開版はメニューの中身がバージョン表示だけになるため、
-  // ☰ を出さずにその位置へバージョンをそのまま表示する
   $btnMenu.textContent = `v${APP_VERSION}`
   $btnMenu.classList.add('version-label')
   $btnMenu.title = `web markdown preview v${APP_VERSION}`
 } else {
   $btnMenu.innerHTML = ICONS.menu
   $btnMenu.title = `メニュー（version ${APP_VERSION}）`
-  $btnMenu.addEventListener('click', (e) => {
-    e.stopPropagation() // document の click→hideCtx で即閉じしないように
-    if (ctxEl.style.display === 'block') hideCtx() // 開いていればトグルで閉じる
-    else openMenu($btnMenu)
-  })
 }
+$btnMenu.addEventListener('click', (e) => {
+  e.stopPropagation() // document の click→hideCtx で即閉じしないように
+  if (ctxEl.style.display === 'block') hideCtx() // 開いていればトグルで閉じる
+  else openMenu($btnMenu)
+})
+
+// ツリーの余白（ファイル / フォルダ以外）での右クリック: 非表示にしたものを戻す
+document.getElementById('tree-pane').addEventListener('contextmenu', (e) => {
+  if (e.target.closest('.file-label, .dir-label')) return // 項目上は pathMenu が担当
+  e.preventDefault()
+  const items = hiddenPaths.size
+    ? [{ label: `非表示にしたものを表示する（${hiddenPaths.size} 件）`, action: unhideAll }]
+    : [{ label: '非表示にしたものはありません', static: true }]
+  items.push({ sep: true })
+  items.push({ label: 'サイドバーを閉じる', icon: ICONS.sidebarOn, action: () => setLeftHidden(true) })
+  showCtx(e.clientX, e.clientY, items)
+})
+
+// 見出しサイドバーの右クリック: こちらも閉じられるようにする
+$sidebarRight.addEventListener('contextmenu', (e) => {
+  e.preventDefault()
+  showCtx(e.clientX, e.clientY, [{ label: 'サイドバーを閉じる', icon: ICONS.sidebarOn, action: () => setRightHidden(true) }])
+})
 
 $openBtn.addEventListener('click', openFolder)
-$openPathBtn.addEventListener('click', openPathDialog)
 // タブ一覧: 縦ホイールでも横スクロールできるようにする（スクロールバーは CSS で非表示）
 for (const pane of Object.values(panes)) {
   pane.$tabs.addEventListener(
@@ -2962,7 +2998,9 @@ for (const pane of Object.values(panes)) {
 }
 $btnSplit.innerHTML = ICONS.split
 $btnSplit.addEventListener('click', () => setSplit(!splitOn))
-// 開閉はスプリッタのドラッグ判定（makeDrag の onToggle）で処理する
+// サイドバーの開閉（ボタンはヘッダー行。開いている間はサイドバー側、閉じている間はメイン側）
+$collapseLeft.addEventListener('click', () => setLeftHidden($sidebar.style.display !== 'none'))
+$collapseRight.addEventListener('click', () => setRightHidden($sidebarRight.style.display !== 'none'))
 // 「表示」変更はアクティブなタブにのみ適用・保持する
 $view.addEventListener('change', () => {
   updateDefaultMarker() // tooltip を選択中のパスへ更新

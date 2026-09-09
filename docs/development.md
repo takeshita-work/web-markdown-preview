@@ -38,7 +38,7 @@ web-markdown-preview [オプション]
 - 配置: スタンドアロン exe は **exe と同じフォルダの `config.json`**、dev は**プロジェクト直下の `config.json`**。
 - 形式: `{ "port": 5000 }`
 - 解決順: **`--port` 引数 > `config.json` > 環境変数 `PORT` > 既定 4321**
-- アプリ画面の **⚙設定**（フッター左）からも変更可能。**保存**で `config.json` に書き込み（次回起動時に反映）。スタンドアロン版は **「保存して再起動」**で新ポートへ即時切替（自動でブラウザが新 URL へ移動）。
+- アプリ画面の **アプリ設定**（☰ メニュー）からも変更可能。**保存**で `config.json` に書き込み（次回起動時に反映）。スタンドアロン版は **「保存して再起動」**で新ポートへ即時切替（自動でブラウザが新 URL へ移動）。
 - 関連 API: `GET /__config`（現在値）/ `POST /__config {port}`（保存）/ `POST /__restart`（新ポートで起動し直し・standalone のみ）。
 - `config.json` は実行時に生成されるため Git 管理しない（`.gitignore`）。
 
@@ -52,7 +52,7 @@ web-markdown-preview/
 │   ├── standalone.js   配布用エントリ（SEA 埋め込みアセット配信 + start/stop/status/run）
 │   └── client/main.js  クライアント本体（FS Access API + 描画 + UI のすべて）
 ├── public/
-│   ├── index.html      画面レイアウト（ヘッダー / 本文 / 右サイドバー / フッター）
+│   ├── index.html      画面レイアウト（ヘッダー / 本文 / 右サイドバー）
 │   ├── app.css         スタイル
 │   └── bundle.js       esbuild 生成物（.gitignore 済み・コミットしない）
 ├── scripts/
@@ -124,7 +124,7 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 - 定義元は `package.json` の `version` のみ。esbuild の `define` で `__APP_VERSION__` としてバンドルに埋め込む（`src/server.js` の `buildOptions` と `scripts/build-exe.mjs` の両方）。
 - クライアントは `APP_VERSION` として参照し、以下の 3 箇所に表示する。
   - ヘッダー右端の **☰ メニュー末尾**（クリック不可の情報行 `.mi-static`）。公開（GitHub Pages）版は ☰ を出さず、**その位置に `v0.2.0` のように直接表示**する
-  - **設定ダイアログ**の冒頭（`version x.y.z / 現在のポート: N`）
+  - **アプリ設定ダイアログ**の冒頭（`version x.y.z / 現在のポート: N`）
   - ☰ ボタンの **tooltip**
 - `define` されない経路でバンドルした場合は `'dev'` にフォールバックする。
 
@@ -165,9 +165,10 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
 ## クライアント実装の要点（`src/client/main.js`）
 
 - **状態** … `fileMap`（path→FileSystemFileHandle）、`themeList` / `styleList`（CSS 分類）、`tabs`（開いているタブ）、`activePath` / `previewPath`。
-- **ペイン（2 分割）** … `panes = { a, b }`（各 `{ el, $tabs, $view, $empty, $loading, activePath, previewPath }`）、`focusedPane` / `splitOn`。`activePath` は「フォーカス中ペインのアクティブタブ」を映すので、フッター・見出し・ズームなど既存の処理はそのまま使える。表示可否は `isVisibleTab()`（＝自分のペインで前面か）で判定する。フォーカス移動は各ペインと iframe 文書の `mousedown` / `wheel` から `focusPane()` を呼ぶ（iframe 内のイベントは親に伝わらないため文書側にも登録する）。`setSplit()` で開閉（解除時は右のタブを左へ引き取る。`closeTab()` では全タブが無くなったときだけ解除し、空のペインはそのまま残す）、`moveTabToPane()` でペイン間移動（タブのドラッグ＆ドロップと右クリックメニューから呼ぶ。移動先が既にフォーカス中でも反映されるよう、末尾で必ず `renderTabs()` / `syncPreview()` を呼ぶ）。未分割時にビューの右 40% へドロップすると `setSplit(true)` 込みで右へ移す（`.pane-view.drop-right` が目印）。移動で移動元が空になったときは分割を解除するが、その移動自体が分割を開いた場合（`wasSplit === false`）は解除しない。
+- **ペイン（2 分割）** … `panes = { a, b }`（各 `{ el, $tabs, $view, $empty, $loading, activePath, previewPath }`）、`focusedPane` / `splitOn`。`activePath` は「フォーカス中ペインのアクティブタブ」を映すので、ヘッダーの表示コントロール・見出し・ズームなど既存の処理はそのまま使える。表示可否は `isVisibleTab()`（＝自分のペインで前面か）で判定する。フォーカス移動は各ペインと iframe 文書の `mousedown` / `wheel` から `focusPane()` を呼ぶ（iframe 内のイベントは親に伝わらないため文書側にも登録する）。`setSplit()` で開閉（解除時は右のタブを左へ引き取る。`closeTab()` では全タブが無くなったときだけ解除し、空のペインはそのまま残す）、`moveTabToPane()` でペイン間移動（タブのドラッグ＆ドロップと右クリックメニューから呼ぶ。移動先が既にフォーカス中でも反映されるよう、末尾で必ず `renderTabs()` / `syncPreview()` を呼ぶ）。未分割時にビューの右 40% へドロップすると `setSplit(true)` 込みで右へ移す（`.pane-view.drop-right` が目印）。移動で移動元が空になったときは分割を解除するが、その移動自体が分割を開いた場合（`wasSplit === false`）は解除しない。
 - **タブ** … `{ iframe, path, handle, pane, view, defaultView, source, zoom:{rendered,source}, preview, prevSrc, ... }`。タブはファイル 1 つにつき 1 枚（同じファイルを両ペインには開けない）。
-- **フォルダごとの設定** … `localStorage['mdpreview.folderSettings']` = `{ "<フォルダ名>": { cssDirs: [] } }`（旧・単一指定の `cssDir` は読み込み時に配列へ移行し、保存時に消す）。`loadFolderSettings()` / `saveFolderSettings()`。`loadRoot()` で復元し、`classifyCss()` が `inCssDir()` で `.css` を絞り込む。候補は `cssDirTree()`（`.css` を含むディレクトリのツリー。`count` = 配下の総数 / `direct` = 直下の数）を開閉付きのツリー一覧で表示し、`compressCssDirNode()` が「css を持たず子が 1 つだけ」の階層を畳んで 1 行にする（深いパスでも一覧が短くなる）。選択は複数持て（`cssDirs`）、`addCssDir()` が上位・配下の重複を畳み、`coveredByCssDir()` が「上位で選択済み」の判定を行う。変更は `setCssDirs()`（再分類 → 候補外の CSS を選んでいたタブは `view` を既定に戻して再描画）。UI は `openCssDirDialog()`（フッターの `#btn-cssdir`。「表示」セレクトの右。状態表示は `updateCssDirUI()`）。「表示」セレクトの選択肢は `shortenPath()` で省略表示し、完全なパスは option の `title` と `$view.title`（`updateDefaultMarker()` で同期）に持たせる。
+- **一時的な非表示** … `hiddenPaths`（Set）に入れたパスは `renderNode()` が描画しない（フォルダなら配下ごと）。切り替えは `hidePath()` / `unhideAll()` → `rerenderTree()`（`lastTree` を保持しておき、展開状態とスクロール位置を維持して描き直す）。ツリーの項目は `pathMenu(e, path, true)`、余白は `#tree-pane` の `contextmenu` が担当。`loadRoot()` で解除する。
+- **フォルダごとの設定** … `localStorage['mdpreview.folderSettings']` = `{ "<フォルダ名>": { cssDirs: [] } }`（旧・単一指定の `cssDir` は読み込み時に配列へ移行し、保存時に消す）。`loadFolderSettings()` / `saveFolderSettings()`。`loadRoot()` で復元し、`classifyCss()` が `inCssDir()` で `.css` を絞り込む。候補は `cssDirTree()`（`.css` を含むディレクトリのツリー。`count` = 配下の総数 / `direct` = 直下の数）を開閉付きのツリー一覧で表示し、`compressCssDirNode()` が「css を持たず子が 1 つだけ」の階層を畳んで 1 行にする（深いパスでも一覧が短くなる）。選択は複数持て（`cssDirs`）、`addCssDir()` が上位・配下の重複を畳み、`coveredByCssDir()` が「上位で選択済み」の判定を行う。変更は `setCssDirs()`（再分類 → 候補外の CSS を選んでいたタブは `view` を既定に戻して再描画）。UI は `openCssDirDialog()`（☰ メニューの「CSS の設定」。指定中は項目ラベルに件数が付く）。「表示」セレクトの選択肢は `shortenPath()` で省略表示し、完全なパスは option の `title` と `$view.title`（`updateDefaultMarker()` で同期）に持たせる。
 - **土台 CSS** … `BASE_STD_CSS`（標準表示のみ）。選択 CSS の直前に注入する最小限のコードブロック用スタイル（余白・端での折り返し・行間）。`!important` 無し・後勝ちなので、テーマ側に同じ指定があればそちらが優先される。上書き専用 CSS（VS Code の `markdown.styles` 等）への対策。
 - **コードブロックの行** … `splitCodeLines()` / `wrapCodeLines()` が `fence` / `code_block` の既定レンダラをラップし、`<code>` の中身を 1 行ずつ `span.mdp-cl`（`display:block`）に分割する。`line-height` だけでは折り返しと改行を区別できないため、改行の間だけ `margin` を入れるにはブロック化が必要。改行文字自体は `span.mdp-nl`（`display:none`）が保持するので、`textContent`（＝turndown による選択範囲のソースコピー）は元のテキストと一致する。marp は別の markdown-it インスタンスのため対象外。
 - **レンダリング** … `renderTab()` → `buildDocument()`。.md は markdown-it / marp-core、.pdf は blob URL。`onIframeLoad()` でズーム適用・見出し抽出・スクロール同期・リンク/右クリック購読。スクロール時の見出し追従（`updateActiveHeading()`）は 1 フレーム 1 回に間引く（長い文書では見出しの矩形取得が重いため）。
@@ -177,7 +178,7 @@ git push origin v0.1.0      # → Actions が走り Releases に exe が公開�
   - `zoom` ではなく `transform` を使うのは、`zoom` では倍率ごとに折り返しが変わり「カーソル位置を中心に拡大」ができないため。レイアウト幅を `documentElement.clientWidth`（100% 時の幅）に固定し、縮小時は `translateX` で中央寄せする。
   - `transform` はレイアウト高さを変えないため、スクロール量は `documentElement.style.height = 実寸 × 倍率` で合わせる（これが無いと縮小時に文書末尾に空白が残る）。
   - プレビュー枠のリサイズは `paneObserver`（ResizeObserver）で検知し、レイアウト幅を測り直す。印刷時は生成ドキュメント側の `@media print` で `transform` / 固定幅を打ち消す。
-- **ドラッグ** … `makeDrag()` が Pointer Events + `setPointerCapture` で開閉（クリック）とリサイズ（ドラッグ）を判別。
+- **ドラッグ** … `makeDrag()` が Pointer Events + `setPointerCapture` でリサイズを処理する（スプリッタはドラッグ専用）。サイドバーの開閉は `#collapse-left` / `#collapse-right`（`.side-toggle`）で、`setLeftHidden()` / `setRightHidden()` が開閉状態に応じてボタン自体を `.open-bar` / `.pane-spacer` ⇄ `#toolbar` へ移動させ、山形アイコンの向き（`scaleX(-1)`）と tooltip を切り替える。
 
 ## 動作要件
 

@@ -2,28 +2,8 @@
 html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; }
 #app { display: flex; flex-direction: column; height: 100vh; }
 #workspace { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
-#footer {
-  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-top: 1px solid #ddd; background: #f7f7f7; overflow: hidden;
-}
-#footer label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
-#footer select { font-size: 12px; padding: 2px 4px; }
-/* 長いパスでフッターが押し広げられないように上限を設ける（表示は省略形＋tooltip） */
+/* 長いパスでヘッダーが押し広げられないように上限を設ける（表示は省略形＋tooltip） */
 #view { max-width: 260px; }
-/* プレビュー中ファイルの情報（フッター・1行・左詰め・項目間は余白で区切る） */
-.file-info {
-  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 16px;
-  overflow: hidden; font-size: 11px; color: #777;
-}
-/* コピーボタン + パスは近接させた1グループ */
-.file-info .fi-name { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 3px; }
-.file-info .fi-path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-info .fi-item { flex: 0 0 auto; white-space: nowrap; }
-.file-info .fi-copy {
-  flex: 0 0 auto; display: inline-flex; align-items: center; padding: 2px;
-  border: none; background: none; color: #888; cursor: pointer; border-radius: 3px;
-}
-.file-info .fi-copy:hover { background: #e3e3e3; color: #333; }
 
 /* ズーム操作を一体化（[−][100%][＋] を隙間なく連結） */
 .zoom-group { display: inline-flex; align-items: stretch; }
@@ -54,31 +34,36 @@ html, body { height: 100%; margin: 0; font-family: "Segoe UI", "Hiragino Sans", 
 /* ---- スプリッタ ---- */
 .splitter { position: relative; flex: 0 0 5px; cursor: col-resize; background: #e3e3e3; }
 .splitter:hover { background: #b9b9b9; }
-/* 左の分割線は閉じたとき 0px にして線を消し、開閉ボタンだけを可視パネル端に残す */
+/* 閉じたときは分割線を消す（開閉はヘッダーのボタンで行う） */
 .splitter.collapsed { flex-basis: 0; cursor: default; background: transparent; }
 .splitter.collapsed:hover { background: transparent; }
-#split-left.collapsed > .split-handle { left: 0; right: auto; transform: none; }
-/* 右の分割線は閉じても線（幅）を残し、開閉ボタンは境界の中央に置く */
-#split-right.collapsed { flex-basis: 10px; }
-.split-handle {
-  position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
-  width: 9px; height: 28px; padding: 0; border: 1px solid #b5b5b5; border-radius: 5px;
-  background: #d3d3d3; color: #555; font-size: 9px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; z-index: 5;
+
+/* サイドバーの開閉ボタン: ヘッダー行に置く。開いている間はサイドバー側、
+   閉じている間はメインのツールバー側へ JS が移動させる。
+   境界線（スプリッタ）に密着させ、帯の一部に見えるよう枠と角丸は付けない */
+.side-toggle {
+  flex: 0 0 auto; width: 24px; height: 100%; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 0; background: transparent; color: #666; cursor: pointer;
 }
-.split-handle:hover { background: #c2c2c2; }
+.side-toggle:hover { background: #e2e2e2; color: #222; }
+.side-toggle svg { display: block; }
+/* 各ヘッダーの境界側の内側余白は .open-bar / .pane-spacer 側で 0 にしてある */
+.pane-spacer { display: flex; align-items: center; padding: 0 8px 0 0; }
+#toolbar > .side-toggle:first-child { margin-left: -10px; }
+#toolbar > .side-toggle:last-child { margin-right: -10px; }
 
 /* ---- 左: フォルダ操作 ---- */
 .open-bar {
   display: flex; flex-direction: row; align-items: center; gap: 6px;
-  height: 36px; padding: 0 10px; border-bottom: 1px solid #eee; background: #f0f0f0; flex: 0 0 auto;
+  height: 36px; padding: 0 0 0 10px; border-bottom: 1px solid #eee; background: #f0f0f0; flex: 0 0 auto;
 }
-.open-bar button {
+.open-bar button:not(.side-toggle) {
   font-size: 15px; line-height: 1; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px;
   background: #fff; cursor: pointer; flex: 0 0 auto;
 }
-.open-bar button:hover:not(:disabled) { background: #e8e8e8; }
-.open-bar button:disabled { opacity: .45; cursor: default; }
+.open-bar button:not(.side-toggle):hover:not(:disabled) { background: #e8e8e8; }
+.open-bar button:not(.side-toggle):disabled { opacity: .45; cursor: default; }
 .root-name { flex: 1; font-size: 14px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* モーダルダイアログ */
@@ -187,7 +172,7 @@ html { scrollbar-color: #949494 #d2d2d2; }
   display: flex; align-items: center; gap: 8px;
   height: 36px; padding: 0 10px; border-bottom: 1px solid #ddd; background: #f7f7f7; overflow: hidden;
 }
-/* 右サイドバー最上部: ヘッダーと高さを揃えるための空スペーサー（ラベルなし） */
+/* 右サイドバー最上部: ヘッダーと高さを揃えるための帯（開閉ボタンを置く） */
 .pane-spacer { flex: 0 0 auto; height: 36px; border-bottom: 1px solid #ddd; background: #f7f7f7; }
 #toolbar label { font-size: 12px; color: #555; display: flex; gap: 4px; align-items: center; }
 #toolbar select { font-size: 12px; padding: 2px 4px; }
@@ -198,6 +183,8 @@ html { scrollbar-color: #949494 #d2d2d2; }
 #toggle-left:hover, #toggle-right:hover { background: #e8e8e8; }
 #toggle-left.off, #toggle-right.off { background: #d7d7d7; color: #888; }
 .spacer { flex: 1; }
+/* ツールバーのグループ区切り */
+.tb-sep { flex: 0 0 auto; width: 1px; height: 18px; background: #d8d8d8; margin: 0 2px; }
 #zoom-indicator {
   font-size: 12px; color: #555; cursor: pointer; padding: 2px 6px;
   border: 1px solid #ddd; border-radius: 4px; background: #fff; min-width: 46px; text-align: center;
@@ -211,8 +198,8 @@ html { scrollbar-color: #949494 #d2d2d2; }
 .tbtn.on { background: #d7ebff; border-color: #9cc6ee; }
 .tbtn:disabled { opacity: .4; cursor: default; }
 /* 公開（GitHub Pages）版: ☰ の位置に出すバージョン表示。ボタンには見せない */
-.tbtn.version-label { border: 0; background: none; color: #999; cursor: default; padding: 4px 2px; }
-.tbtn.version-label:hover { background: none; }
+.tbtn.version-label { border: 0; background: none; color: #999; padding: 4px 4px; }
+.tbtn.version-label:hover { background: #ececec; color: #555; }
 /* メニュー（ハンバーガー）ボタン: ヘッダー右端・グレーアイコン */
 #btn-menu { margin-left: auto; color: #555; }
 /* 確認ダイアログの実行ボタン（グレー） */
@@ -222,11 +209,18 @@ html { scrollbar-color: #949494 #d2d2d2; }
 /* コンテキストメニュー */
 .ctxmenu {
   position: fixed; z-index: 1000; background: #fff; border: 1px solid #bbb;
-  border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: 4px 0;
+  border-radius: 0; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: 4px 0;
   min-width: 170px; font-size: 13px;
 }
 .ctxmenu .mi { padding: 6px 14px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
 .ctxmenu .mi:hover { background: #e3f0ff; }
+/* グループの区切り線 */
+.ctxmenu .mi-sep { height: 1px; margin: 4px 0; background: #e5e5e5; }
+/* 実行できない項目（履歴が無いときの戻る/進む など） */
+.ctxmenu .mi-disabled { color: #aaa; cursor: default; }
+.ctxmenu .mi-disabled .mi-icon { color: #bbb; }
+.ctxmenu .mi-disabled:hover { background: transparent; }
+.ctxmenu .mi-sep:first-child, .ctxmenu .mi-sep:last-child { display: none; }
 .ctxmenu .mi-icon { flex: 0 0 auto; display: inline-flex; align-items: center; color: #555; }
 .ctxmenu .mi-icon svg { display: block; }
 /* バージョン等の情報行: クリック不可・区切り線付きでメニュー末尾に置く */
@@ -235,6 +229,8 @@ html { scrollbar-color: #949494 #d2d2d2; }
   padding: 5px 14px; margin-top: 4px; border-top: 1px solid #e5e5e5;
 }
 .ctxmenu .mi-static:hover { background: transparent; }
+/* 情報行が先頭（＝単独）のときは、上の区切り線と余白を出さない */
+.ctxmenu .mi-static:first-child { margin-top: 0; border-top: 0; padding-top: 6px; }
 
 /* トースト */
 .toast {
@@ -249,7 +245,7 @@ html { scrollbar-color: #949494 #d2d2d2; }
 /* SVG アイコンの位置・サイズを揃える（ツリー/タブのファイル表示・ツールバーの各ボタン） */
 .ficon svg,
 .tbtn svg,
-.open-bar button svg { display: block; }
+.open-bar button:not(.side-toggle) svg { display: block; }
 
 /* タブは各ペインの .pane-tabs に入る（横スクロールバーは隠す） */
 .tab {
