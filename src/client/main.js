@@ -2375,8 +2375,9 @@ function closeTab(path) {
     const rest = paneTabs(pane.id)
     pane.activePath = rest.length ? rest[rest.length - 1].path : null
   }
-  // 空になったペインは畳む（左右どちらでも。残った側のタブを引き取る）
-  if (splitOn && !paneTabs(pane.id).length) setSplit(false)
+  // 空のペインはそのまま残す（クリックしてアクティブにし、そこへファイルを開けるように）。
+  // すべてのタブが無くなったときだけ 1 画面へ戻す
+  if (splitOn && !tabs.size) setSplit(false)
   focusPane(focusedPane, false) // activePath をフォーカス中ペインに合わせ直す
   renderTabs()
   syncPreview()
@@ -2433,6 +2434,7 @@ function setSplit(on) {
 function moveTabToPane(path, to) {
   const t = tabs.get(path)
   if (!t || t.pane === to) return
+  const wasSplit = splitOn // 分割を開くための移動かどうか
   if (to === 'b' && !splitOn) setSplit(true)
   const from = paneOf(t)
   if (from.activePath === path) from.activePath = (paneTabs(from.id).find((x) => x.path !== path) || {}).path || null
@@ -2441,7 +2443,10 @@ function moveTabToPane(path, to) {
   panes[to].$view.appendChild(t.iframe)
   panes[to].activePath = path
   focusPane(to, false)
-  if (!paneTabs('b').length && splitOn) setSplit(false) // 右が空になったら分割を解除
+  // 移動元が空になったら分割を解除する（残った側へタブを引き取る）。
+  // ただし「分割するための移動」で解除すると操作が無意味になるので、元から分割
+  // していた場合だけ。タブを閉じてできた空ペインは残す（そこへ開けるようにするため）
+  if (wasSplit && splitOn && !paneTabs(from.id).length) setSplit(false)
   // 移動先が既にフォーカス中でも表示を更新する（focusPane は変化が無いと何もしない）
   renderTabs()
   syncPreview()
@@ -2460,7 +2465,18 @@ function activateTab(path) {
 }
 
 function syncPreview() {
-  for (const p of Object.values(panes)) p.$empty.style.display = paneTabs(p.id).length ? 'none' : 'flex'
+  for (const p of Object.values(panes)) {
+    const has = paneTabs(p.id).length
+    p.$empty.style.display = has ? 'none' : 'flex'
+    // 分割中の空ペインは「ここに開ける」ことが分かる文言にする
+    if (!has) {
+      p.$empty.textContent = !splitOn
+        ? '.md, .html, .pdf を選択してください。'
+        : p.id === focusedPane
+          ? 'ファイルを選択すると、ここに表示します。'
+          : 'クリックしてから、ファイルを選択してください。'
+    }
+  }
   for (const [p, t] of tabs) t.iframe.classList.toggle('hidden', paneOf(t).activePath !== p)
   document.querySelectorAll('.file-label').forEach((el) =>
     el.classList.toggle('active', el.dataset.path === activePath)
