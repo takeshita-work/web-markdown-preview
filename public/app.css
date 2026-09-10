@@ -269,12 +269,16 @@ html { scrollbar-color: #949494 #d2d2d2; }
 .pane-tabs::-webkit-scrollbar { display: none; }
 /* 分割中はフォーカス側のタブバーを明るくして区別する */
 #panes.split .pane.focused .pane-tabs { background: #e3f0ff; }
-/* 表示領域の地色はプレビュー文書の周囲と同じ濃いグレー。
-   タブが無いペイン（分割直後など）が白く抜けて見えるのを防ぐ */
-.pane-view { flex: 1; position: relative; background: #525659; }
+/* 表示領域の地色は白。生 HTML のプレビューは背景を指定していないことがあり、
+   ここを濃くすると iframe が透過して透けてしまうため（濃くするのは空ペインだけ） */
+.pane-view { flex: 1; position: relative; background: #fff; }
 .pane-view iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
 .pane-view iframe.hidden { display: none; }
-.pane-view .empty { display: flex; height: 100%; align-items: center; justify-content: center; color: #c3c6c8; }
+/* タブが無いペインだけプレビュー文書の周囲と同じ濃いグレーにする */
+.pane-view .empty {
+  display: flex; height: 100%; align-items: center; justify-content: center;
+  background: #525659; color: #c3c6c8;
+}
 .tab.drop-target { outline: 2px solid #7ab; }
 /* タブを右寄りにドラッグしたときの「ここで分割」の目印 */
 .pane-view.drop-right::after {
