@@ -576,6 +576,16 @@ function revealInTree(path) {
   label.scrollIntoView({ block: 'nearest' })
 }
 
+// 指定ディレクトリとその配下のサブディレクトリをすべて展開する
+function expandAllUnder(path) {
+  const label = $tree.querySelector(`.dir-label[data-path="${cssEsc(path)}"]`)
+  if (!label) return
+  const node = label.parentElement
+  node.classList.remove('collapsed')
+  node.querySelectorAll('.node').forEach((n) => n.classList.remove('collapsed'))
+  refreshTree() // 新たに見えるディレクトリの内容を最新化
+}
+
 // 非表示の状態だけを変えてツリーを描き直す（展開状態・スクロール位置は保つ）
 function rerenderTree() {
   if (!lastTree) return
@@ -1858,6 +1868,9 @@ function pathMenu(e, path, inTree) {
         action: () => pinFile({ name: path.split('/').pop(), path, handle: fileMap.get(path) }),
       })
       items.push(otherPaneItem(path))
+      items.push({ sep: true })
+    } else {
+      items.push({ label: 'すべて展開', icon: ICONS.folder, action: () => expandAllUnder(path) })
       items.push({ sep: true })
     }
   } else {
