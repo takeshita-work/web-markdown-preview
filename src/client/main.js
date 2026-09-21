@@ -734,12 +734,27 @@ function resolveLocalImagePath(src, baseDir) {
   return fileMap.has(resolved) ? resolved : null
 }
 
+// blob URL → フォルダ内の相対パス（右クリックで元のファイルパスをコピーするため）
+const blobPaths = new Map()
+
+// img / video / audio 要素が指すフォルダ内の相対パス（解決できなければ null）
+function mediaPathOf(el) {
+  if (!el) return null
+  const p = el.getAttribute('data-mdp-src')
+  if (p) return p
+  for (const u of [el.currentSrc, el.getAttribute('src'), el.querySelector && el.querySelector('source[src]')?.getAttribute('src')]) {
+    if (u && blobPaths.has(u)) return blobPaths.get(u)
+  }
+  return null
+}
+
 async function toBlobUrl(src, baseDir, store) {
   const resolved = resolveLocalImagePath(src, baseDir)
   if (!resolved) return null
   try {
     const url = URL.createObjectURL(await fileMap.get(resolved).getFile())
     store.push(url)
+    blobPaths.set(url, resolved)
     return url
   } catch {
     return null
@@ -1182,7 +1197,7 @@ function onIframeLoad(tab) {
     e.preventDefault()
     const rect = tab.iframe.getBoundingClientRect()
     const img = e.target && e.target.closest ? e.target.closest('img') : null
-    const video = e.target && e.target.closest ? e.target.closest('video') : null
+    const video = e.target && e.target.closest ? e.target.closest('video, audio') : null
     showContentMenu(rect.left + e.clientX, rect.top + e.clientY, tab, img, video)
   })
   doc.addEventListener('click', hideCtx) // iframe 内クリックでメニューを閉じる
@@ -1895,9 +1910,16 @@ function showContentMenu(x, y, tab, imgEl, videoEl) {
   const items = []
   // 右クリックした対象そのものへの操作を先頭に
   if (imgEl) items.push({ label: '画像をコピー', icon: ICONS.copy, action: () => copyImageToClipboard(imgEl) })
-  if (videoEl) {
+  if (videoEl && videoEl.tagName === 'VIDEO') {
     // 動画そのものは Clipboard API が対応する MIME 型に無いため、現在のフレームを画像としてコピーする
     items.push({ label: '現在のフレームを画像コピー', icon: ICONS.copy, action: () => copyVideoFrameToClipboard(videoEl) })
+  }
+  // 画像・動画・音声のファイルパス / ファイル名（フォルダ内のファイルに解決できたものだけ）
+  const mediaPath = mediaPathOf(imgEl) || mediaPathOf(videoEl)
+  if (mediaPath) {
+    const kind = imgEl ? '画像' : videoEl.tagName === 'AUDIO' ? '音声' : '動画'
+    const [pathItem, nameItem] = copyPathItems(mediaPath)
+    items.push({ ...pathItem, label: `${kind}の相対パスをコピー` }, { ...nameItem, label: `${kind}のファイル名をコピー` })
   }
   if (items.length) items.push({ sep: true })
   const idx = tab.historyIndex || 0
@@ -2772,6 +2794,7 @@ window.addEventListener('message', async (e) => {
     try {
       url = URL.createObjectURL(await h.getFile())
       tab.blobUrls.push(url)
+      blobPaths.set(url, resolved)
     } catch {}
   }
   e.source.postMessage({ __mdpResolved: true, id: d.id, url }, '*')
