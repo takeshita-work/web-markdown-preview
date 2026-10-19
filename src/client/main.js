@@ -1232,8 +1232,10 @@ function onIframeLoad(tab) {
     renderOutline(tab)
     updateActiveHeading(tab)
   }
-  // タブの再作成・再読み込み・自動リロードのいずれでも、直前のスクロール位置を維持する
-  restoreScrollPosition(tab)
+  // #アンカー付きリンクでの遷移なら、保存済みスクロール位置より優先してそこへスクロールする。
+  // それ以外は、タブの再作成・再読み込み・自動リロードのいずれでも直前の位置を維持する。
+  if (tab.pendingAnchor) applyPendingAnchor(tab)
+  else restoreScrollPosition(tab)
   // 自動リロード時は変更箇所をハイライトのみで知らせる（表示位置は動かさない）
   if (tab.scrollToLine != null) {
     if (tab.scrollHighlight !== false) highlightChangedLine(doc, tab.scrollToLine)
@@ -1301,6 +1303,43 @@ function restoreScrollPosition(tab) {
   }, 80)
 }
 
+// 他ファイル（または自ファイル）からの #アンカー付きリンクによる遷移先スクロール。
+// tab.pendingAnchor を直ちに試み、ドキュメントが未ロードなら onIframeLoad 側の
+// applyPendingAnchor に委ねる（pendingAnchor をセットしたまま残す）。
+function applyAnchorTo(tab, anchor) {
+  tab.pendingAnchor = anchor
+  applyPendingAnchor(tab)
+}
+
+// 遅延画像の読み込みで文書高さが伸びてもずれないよう、restoreScrollPosition と同様に
+// 短時間だけ再適用する。見つからなければ何もしない（存在しないアンカーは無視）。
+function applyPendingAnchor(tab) {
+  const id = tab.pendingAnchor
+  if (!id) return
+  const doc = tab.iframe.contentDocument
+  if (!doc || !doc.body) return // 未ロードなら onIframeLoad 側で改めて呼ばれる
+  tab.pendingAnchor = null
+  const find = () => doc.getElementById(id) || doc.querySelector(`a[name="${cssEsc(id)}"]`)
+  let cancelled = false
+  const stop = () => (cancelled = true)
+  doc.addEventListener('wheel', stop, { once: true, passive: true })
+  doc.addEventListener('touchstart', stop, { once: true, passive: true })
+  doc.addEventListener('keydown', stop, { once: true })
+  doc.addEventListener('pointerdown', stop, { once: true, passive: true })
+  const apply = () => {
+    if (cancelled) return
+    const el = find()
+    if (el) el.scrollIntoView({ block: 'start' })
+  }
+  apply()
+  requestAnimationFrame(() => requestAnimationFrame(apply))
+  let n = 0
+  const timer = setInterval(() => {
+    apply()
+    if (cancelled || ++n >= 12) clearInterval(timer)
+  }, 80)
+}
+
 // data-line を持つ要素のうち、指定行に最も近い箇所をハイライトする（スクロールはしない）
 function highlightChangedLine(doc, line) {
   const els = [...doc.querySelectorAll('[data-line]')]
@@ -1351,9 +1390,20 @@ function handleLinkClick(e, tab, newTab) {
     return
   }
 
-  // 内部相対リンク → フォルダ内ファイルを解決
-  let clean = href.split('#')[0].split('?')[0]
+  // 内部相対リンク → フォルダ内ファイルを解決（他ファイルへの #アンカー付きリンクは、
+  // パス解決後に遷移先タブ側でそのアンカーへスクロールさせるため、ここでは保持しておく）
+  const hashIdx = href.indexOf('#')
+  const hashPart = hashIdx >= 0 ? href.slice(hashIdx + 1) : ''
+  let clean = (hashIdx >= 0 ? href.slice(0, hashIdx) : href).split('?')[0]
   if (!clean) return
+  let anchor = null
+  if (hashPart) {
+    try {
+      anchor = decodeURIComponent(hashPart)
+    } catch {
+      anchor = hashPart
+    }
+  }
   try {
     clean = decodeURI(clean) // 日本語・空白は percent-encode されているためデコード
   } catch {}
@@ -1365,9 +1415,9 @@ function handleLinkClick(e, tab, newTab) {
   const node = { type: 'file', name: resolved.split('/').pop(), path: resolved, handle: h }
   if (PREVIEWABLE.test(resolved)) {
     if (newTab) {
-      pinFile(node) // ホイールクリック: 新しいタブとして開く（既に開いていれば切替）
+      pinFile(node, anchor) // ホイールクリック: 新しいタブとして開く（既に開いていれば切替）
     } else {
-      navigateTabTo(tab, node, true) // 通常クリック: 同じタブのまま遷移
+      navigateTabTo(tab, node, true, anchor) // 通常クリック: 同じタブのまま遷移
     }
   } else {
     // 画像など非対応ファイルはブラウザ別タブで
@@ -2362,7 +2412,7 @@ const paneObserver = new ResizeObserver((entries) => {
   }
 })
 
-function openTab(node, preview) {
+function openTab(node, preview, anchor) {
   const iframe = document.createElement('iframe')
   iframe.className = 'hidden'
   const tab = {
@@ -2370,6 +2420,7 @@ function openTab(node, preview) {
     pane: focusedPane, // 開いた時点でフォーカスしているペインに属する
     preview: !!preview, view: '', defaultView: '', source: false, zoom: { rendered: 1, source: 1 },
     history: [node.path], historyIndex: 0, // タブ内リンク遷移の履歴（[←][→] 用）
+    pendingAnchor: anchor || null, // ロード後にスクロールすべき #アンカー（他ファイルからのリンク由来）
   }
   iframe.addEventListener('load', () => onIframeLoad(tab))
   paneObserver.observe(iframe)
@@ -2394,14 +2445,16 @@ function previewFile(node) {
 }
 
 // 確定選択: ダブルクリック or チェックボックス。閉じられない（× で閉じる）
-function pinFile(node) {
+// anchor: リンク元に #アンカー があった場合、開いた（または既に開いている）タブでそこへスクロールする
+function pinFile(node, anchor) {
   const t = tabs.get(node.path)
   if (!t) {
     if (focusedPane !== treeTargetPane) focusPane(treeTargetPane) // 元の作業ペインへ戻す
-    openTab(node, false)
+    openTab(node, false, anchor)
   } else {
     t.preview = false
     activateTab(node.path, true) // 開いているペインで表示（開く先は据え置き）
+    if (anchor) applyAnchorTo(t, anchor) // 既存タブは読み込み済みのため即座に試みる
   }
   for (const p of Object.values(panes)) if (p.previewPath === node.path) p.previewPath = null
   setChecked(node.path, true)
@@ -2410,14 +2463,19 @@ function pinFile(node) {
 
 // タブ内リンク遷移: タブ（iframe）はそのままに表示中のファイルだけを差し替える。
 // pushHistory=true は通常のリンククリック（履歴に積む）、false は [←][→] による履歴移動。
+// anchor: リンク元に #アンカー があった場合、遷移先の読み込み後にそこへスクロールする。
 // 戻り値: 実際に遷移したか（呼び出し元が historyIndex の巻き戻し判断に使う）。
-function navigateTabTo(tab, node, pushHistory) {
-  if (!tab || node.path === tab.path) return true
+function navigateTabTo(tab, node, pushHistory, anchor) {
+  if (!tab || node.path === tab.path) {
+    if (anchor) applyAnchorTo(tab, anchor) // 同一ファイル内の別アンカーへのリンク
+    return true
+  }
   // 遷移先が既に「別の」タブとして開かれている場合は、そちらへ切替える
   // （tabs は path をキーにした Map のため、同じ path で二重登録すると片方が孤立する）
   const existing = tabs.get(node.path)
   if (existing && existing !== tab) {
     activateTab(node.path)
+    if (anchor) applyAnchorTo(existing, anchor) // 読み込み済みのため即座に試みる
     return false
   }
   const oldPath = tab.path
@@ -2435,6 +2493,7 @@ function navigateTabTo(tab, node, pushHistory) {
   tab.lastModified = 0
   tab.prevSrc = null
   tab.scrollToLine = null
+  tab.pendingAnchor = anchor || null // 読み込み完了後（onIframeLoad）に消費する
   tab.headings = []
   tab.view = ''
   tab.defaultView = ''
@@ -2542,6 +2601,9 @@ function setSplit(on) {
     panes.b.activePath = null
     panes.b.previewPath = null
     treeTargetPane = 'a'
+    // スプリッタでリサイズ済みだと左ペインに固定幅（flex: 0 0 ...px）が残っており、
+    // 解除後も全幅に広がらず右側が空いたままになる（CSS 既定の flex: 1 1 50% に戻す）
+    panes.a.el.style.flex = ''
     focusPane('a')
   }
   renderTabs()
@@ -2644,7 +2706,14 @@ function renderTabs() {
     const tab = document.createElement('div')
     tab.className = 'tab' + (pane.activePath === path ? ' active' : '') + (t.preview ? ' preview' : '')
     tab.draggable = true // ペイン間の移動
-    tab.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/mdp-tab', path))
+    tab.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/mdp-tab', path)
+      // プレビュー本文（iframe）はドラッグイベントを奪ってしまい、下の pane.$view に
+      // dragover/drop が届かなくなる。ドラッグ中だけ無効化し、本文上へのドロップでも
+      // 分割・ペイン移動が働くようにする（解除は必ず発火する dragend で行う）
+      document.body.classList.add('tab-dragging')
+    })
+    tab.addEventListener('dragend', () => document.body.classList.remove('tab-dragging'))
     // 中クリックで閉じる
     tab.addEventListener('mousedown', (e) => {
       if (e.button === 1) {
