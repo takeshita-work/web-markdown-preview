@@ -218,6 +218,7 @@ async function openFolder() {
 
 async function loadRoot() {
   $rootName.textContent = rootHandle.name
+  document.title = rootHandle.name // タブが無い状態で開いた直後もタイトルへ反映
   for (const p of [...tabs.keys()]) closeTab(p)
   // ディレクトリ走査中はツリー領域に取得中インジケータを表示（renderTree で置き換わる）
   $tree.innerHTML = '<div class="tree-loading"><span class="spin"></span><span>取得中</span></div>'
@@ -2665,8 +2666,9 @@ function syncPreview() {
   const at = tabs.get(activePath)
   // display:none ⇔ block の切替だけでは反映されない環境があるため、表示のたびに明示的に復元
   restoreScrollPosition(at)
-  // タブタイトルをプレビュー中のファイル名に追従（未選択時は既定へ戻す）
-  document.title = at ? tabDisplayLabel(activePath) : DEFAULT_TITLE
+  // タブタイトルをプレビュー中のファイルに追従：「ディレクトリ名 - ファイル名」
+  // （フォルダ未選択なら既定タイトル、フォルダのみ選択中はディレクトリ名のみ）
+  document.title = rootHandle ? (at ? `${rootHandle.name} - ${tabDisplayLabel(activePath)}` : rootHandle.name) : DEFAULT_TITLE
   $view.value = at && [...$view.options].some((o) => o.value === at.view) ? at.view : defaultViewValue()
   updateDefaultMarker() // アクティブタブの既定に (default) を付与
   // ソース/コピー系ボタンの状態
