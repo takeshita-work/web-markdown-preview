@@ -904,6 +904,7 @@ const SCROLLBAR_CSS = `html{scrollbar-color:#949494 #d2d2d2;}`
 
 const BASE_STD_CSS = `
 table{max-width:100%;}
+img{max-width:100%; height:auto;} /* 元画像が本文幅より大きいとはみ出すため */
 th,td{overflow-wrap:anywhere;} /* 長い URL などで表がシートからはみ出さないようにする */
 pre{padding:16px; overflow:auto; border-radius:6px; white-space:pre-wrap; word-break:break-word; line-height:1.3;}
 pre .mdp-cl{display:block;}
